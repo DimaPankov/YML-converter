@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<yml_catalog date="2026-09-07 13:15" xmlns="http://market.zakupki.mos.ru/spIntegration/Yml/1.0">
+  <shop>
+    <name>Тест</name>
+    <company>ООО «Тест &amp; партнёры»</company>
+    <currencies>
+      <currency id="RUB" rate="1" />
+    </currencies>
+  </shop>
+  <categories>
+    <category id="1">Мебель</category>
+  </categories>
+  <offers>
+    <offer id="A001">
+      <currencyId>RUB</currencyId>
+      <name>Стол &lt;Офис&gt; &amp; "Дом"</name>
+      <picture>https://example.ru/table.png?a=1&amp;b=2</picture>
+      <categoryId>1</categoryId>
+      <beginDate>2026-09-07T12:00:00</beginDate>
+      <endDate>2027-09-07T12:00:00</endDate>
+      <price>1250.50</price>
+      <model>Стол 1</model>
+      <vendor>Фабрика</vendor>
+      <oksm>643</oksm>
+      <delivery>true</delivery>
+      <param name="Цвет">Белый</param>
+      <param name="Материал">Дерево</param>
+      <param name="Ширина">100</param>
+      <param name="Высота">80</param>
+    </offer>
+  </offers>
+</yml_catalog>

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<yml_catalog date="2026-09-14 08:48" xmlns="http://market.zakupki.mos.ru/spIntegration/Yml/1.0">
+  <shop>
+    <name>RLS shop</name>
+    <company>ООО RKSshop</company>
+    <url>https://zakupki.mos.ru/profile/productioncatalog</url>
+    <currencies>
+      <currency id="RUB"/>
+    </currencies>
+  </shop>
+  <categories>
+    <category id="1">Товары</category>
+  </categories>
+  <offers>
+    <offer id="438">
+      <currencyId>RUB</currencyId>
+      <name>Футболка для баскетбола, стритбола RLS</name>
+      <picture>https://raw.githubusercontent.com/DimaPankov/photo/refs/heads/main/ChatGPT%20Image%202%20%D1%81%D0%B5%D0%BD%D1%82(2).png</picture>
+      <ppCategory>793363662</ppCategory>
+      <okei id="796">Штука</okei>
+      <min-quantity>30</min-quantity>
+      <beginDate>2026-09-09T09:22:00</beginDate>
+      <endDate>2026-12-09T09:23:00</endDate>
+      <price>667.53988099749</price>
+      <oksm code="643">РОССИЯ</oksm>
+      <vat>18</vat>
+      <regions>
+        <region>Москва</region>
+        <region>Московская область</region>
+      </regions>
+      <delivery-options>
+        <option cost="0" days="30"/>
+      </delivery-options>
+      <param name="Цвет">Оранжевый</param>
+      <param name="Материал">полиэфир</param>
+      <param name="группа">женская</param>
+      <param name="размер">42</param>
+      <param name="Тип ткани">Синтетическая</param>
+      <param name="Тип нанесения логотипа на ткань ">да</param>
+      <param name="Плотность материала" unit="г/м2">135</param>
+      <param name="Массовая доля основного сырья (волокна) в составе ткани/трикотажного полотна" unit="%">100</param>
+      <param name="Конструктивные особенности">тьть</param>
+      <param name="Вид экипировки">тьть</param>
+      <param name="Рост">164</param>
+    </offer>
+  </offers>
+</yml_catalog>

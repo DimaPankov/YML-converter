@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<yml_catalog date="2026-09-03 15:40" xmlns="http://market.zakupki.mos.ru/spIntegration/Yml/1.0">
+  <shop>
+    <name>RLS</name>
+    <company>ИП Лакин Сергей Анатольевич</company>
+    <url>https://rls.com.ru</url>
+    <currencies>
+      <currency id="RUR" rate="1"/>
+    </currencies>
+  </shop>
+
+  <categories>
+    <category id="1">Баскетбольные и стритбольные футболки</category>
+  </categories>
+
+  <offers>
+    <offer id="RLSBASK001" available="false">
+      <currencyId>RUR</currencyId>
+      <name>Футболка баскетбольная / стритбольная RLS, модель 001</name>
+      <picture>https://i.oneme.ru/i?r=BUE2sh_eZW7g8kugOdIm2Notrvk9sygCQZP3itu3KKxlAJYHSPCYO2VrB0nnJsrY6t--lVzsyQysV3DaVqjHCp2E&amp;expires=1788969014011</picture>
+      <isVisibleToStateCustomers>true</isVisibleToStateCustomers>
+      <isAvailableToIndividuals>false</isAvailableToIndividuals>
+
+      <ppCategory>793363662</ppCategory>
+
+      <okei id="796">Штука</okei>
+      <min-quantity>1</min-quantity>
+      <beginDate>2026-09-03T00:00:00</beginDate>
+      <endDate>2027-09-03T23:59:59</endDate>
+
+      <param name="Цвет">Синий</param>
+      <param name="Материал">Полиэфир</param>
+      <param name="Размер">48</param>
+      <param name="Назначение">Баскетбол / стритбол</param>
+      <param name="Срок изготовления">30 дней</param>
+
+      <price>600</price>
+      <vat>VAT_5</vat>
+      <model>001</model>
+      <vendor>RLS</vendor>
+      <oksm>Китай</oksm>
+      <delivery>true</delivery>
+    </offer>
+  </offers>
+</yml_catalog>

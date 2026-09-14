@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<yml_catalog date="2026-09-08 22:19" xmlns="http://market.zakupki.mos.ru/spIntegration/Yml/1.0">
+  <shop>
+    <name>RLS shop</name>
+    <company>ООО RKSshop</company>
+    <url>https://zakupki.mos.ru/profile/productioncatalog</url>
+    <currencies><currency id="RUB" rate="1"/></currencies>
+  </shop>
+  <categories>
+    <category id="1">Товары</category>
+  </categories>
+  <offers>
+    <offer id="12121212">
+      <currencyId>RUB</currencyId>
+      <name>футболка</name>
+      <picture>https://i.oneme.ru/i?r=BUE2sh_eZW7g8kugOdIm2Notrvk9sygCQZP3itu3KKxlAGA3AlhniOjU7yMCF_bwRge-lVzsyQysV3DaVqjHCp2E&amp;expires=1788968219346</picture>
+      <isVisibleToStateCustomers>true</isVisibleToStateCustomers>
+      <isAvailableToIndividuals>false</isAvailableToIndividuals>
+      <ppCategory>793363662</ppCategory>
+      <okei id="796"/>
+      <min-quantity>10</min-quantity>
+      <beginDate>2024-02-02T20:00:00</beginDate>
+      <endDate>2027-02-02T20:00:00</endDate>
+      <price>1000</price>
+      <oksm code="643">РОССИЯ</oksm>
+      <regions>
+        <region>Москва</region>
+      </regions>
+      <delivery-options>
+        <option cost="1000" days="20"/>
+      </delivery-options>
+      <param name="Цвет">Белый</param>
+      <param name="Материал">Хлопок</param>
+      <param name="Длина">50</param>
+      <param name="Высота">50</param>
+    </offer>
+  </offers>
+</yml_catalog>

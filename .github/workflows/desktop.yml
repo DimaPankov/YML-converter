@@ -1,0 +1,55 @@
+name: Desktop builds
+on:
+  push:
+    paths-ignore: ['legacy/**']
+  pull_request:
+    paths-ignore: ['legacy/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: windows-x64
+          - os: macos-15
+            artifact: macos-arm64
+          - os: macos-15-intel
+            artifact: macos-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Test and package
+        shell: bash
+        run: bash ./gradlew :composeApp:desktopTest :composeApp:packageDistributionForCurrentOS --console=plain
+      - name: Smoke-test packaged app (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $app = Resolve-Path 'composeApp/build/compose/binaries/main/app/YMLStudio/YMLStudio.exe'
+          $process = Start-Process -FilePath $app -ArgumentList @("--smoke-test", "--data-dir", "`"$env:RUNNER_TEMP/yml-smoke`"") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Packaged application failed" }
+      - name: Smoke-test packaged app (macOS)
+        if: runner.os == 'macOS'
+        run: composeApp/build/compose/binaries/main/app/YMLStudio.app/Contents/MacOS/YMLStudio --smoke-test --data-dir "$RUNNER_TEMP/yml-smoke"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: YMLStudio-2.0.0-${{ matrix.artifact }}
+          path: |
+            composeApp/build/compose/binaries/main/dmg/*.dmg
+            composeApp/build/compose/binaries/main/msi/*.msi
+            composeApp/build/compose/binaries/main/exe/*.exe
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tests-${{ matrix.artifact }}
+          path: composeApp/build/reports/tests/desktopTest/
