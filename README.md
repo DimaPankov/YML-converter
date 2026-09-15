@@ -63,6 +63,15 @@ DMG: `composeApp/build/compose/binaries/main/dmg/`.
 Результат: `composeApp/build/compose/binaries/main/msi/` и `exe/`.
 Установка для текущего пользователя; создаются ярлыки в меню и на рабочем столе.
 
+Для сборки EXE из Android Studio / IntelliJ IDEA на Windows откройте папку
+`YML converter`, выберите конфигурацию **YML Studio Windows EXE** и нажмите **▶ Run**.
+Конфигурация `.run/YML Studio Windows EXE.run.xml` выполняет `:composeApp:packageExe`;
+готовый установщик появится в `composeApp/build/compose/binaries/main/exe/`.
+Нужны JDK 17 с `jpackage`, Android SDK 36 и WiX Toolset 3.x.
+Если встроенная Java IDE не содержит `jpackage`, добавьте в параметры конфигурации
+`-PdesktopJavaHome="C:\\путь\\к\\jdk-17"`, указав путь к полному JDK.
+Эту конфигурацию следует запускать на Windows.
+
 EXE/MSI собираются на Windows, DMG — на macOS, как описано в [документации Compose](https://kotlinlang.org/docs/multiplatform/compose-native-distribution.html). В `.github/workflows/desktop.yml` настроены тесты и сборки Windows x64, macOS Apple Silicon и macOS Intel с загрузкой установщиков в artifacts. Workflow нужно запустить в GitHub-репозитории; наличие конфигурации не означает, что Windows-сборка уже проверена. Подпись и notarization не настроены.
 
 **Старый `dist/YML-Studio-Setup-1.0.0-x64.exe` относится к Python-версии, это не новый Kotlin-установщик.**
