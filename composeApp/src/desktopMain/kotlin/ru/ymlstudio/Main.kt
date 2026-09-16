@@ -234,6 +234,7 @@ internal fun Studio(repo: ProjectRepository, initial: Project, closeRequest: Boo
                                         }
                                         Text(v["price"].orEmpty().ifBlank { "—" } + " ₽", fontWeight = FontWeight.Medium)
                                     }
+                                    ProductQuickDetails(p, t, saved.settings)
                                 }
                                 }
                             }
@@ -503,7 +504,7 @@ private val LocalImageDirectory = staticCompositionLocalOf { defaultDataDirector
                     }
                     FieldChoiceConfiguration(f, ::change)
                     Toggle(f.required, "Требовать заполнение в этой форме") { change(f.copy(required = it)) }
-                    if (f.target != "name") Toggle(f.quickAccess, "Быстрый доступ при копировании товара") { change(f.copy(quickAccess = it)) }
+                    if (f.target != "name") Toggle(f.quickAccess, "Быстрый доступ: в списке и при копировании товара") { change(f.copy(quickAccess = it)) }
                 }
             }
             item { AddFieldButtons(t.fields, ::newId) { update(t.copy(fields = t.fields + it)) } }
