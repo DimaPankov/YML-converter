@@ -49,7 +49,8 @@ compose.desktop {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Exe)
             packageName = "YMLStudio"
             packageVersion = "2.2.2"
-            description = "YML Студия — редактор каталогов"
+            // WiX's default MSI code page cannot encode Cyrillic metadata (LGHT0311).
+            description = "YML Studio - catalog editor"
             vendor = "YML Studio"
             modules("java.desktop", "java.logging", "java.xml", "jdk.unsupported")
             macOS { bundleID = "ru.ymlstudio.desktop" }
