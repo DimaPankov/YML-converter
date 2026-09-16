@@ -32,15 +32,15 @@ jobs:
         shell: pwsh
         env:
           # Gradle's org.gradle.jvmargs does not configure the child jpackage JVM.
-          # Compose writes UTF-8 argument files containing the Russian description.
+          # Keep jpackage argument-file decoding consistent with Gradle.
           JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF-8
         run: |
-          .\gradlew.bat :composeApp:desktopTest :composeApp:packageDistributionForCurrentOS --console=plain --stacktrace --info
+          .\gradlew.bat :composeApp:desktopTest :composeApp:createDistributable :composeApp:packageDistributionForCurrentOS --console=plain --stacktrace --info
           exit $LASTEXITCODE
       - name: Test and package (macOS)
         if: runner.os == 'macOS'
         shell: bash
-        run: bash ./gradlew :composeApp:desktopTest :composeApp:packageDistributionForCurrentOS --console=plain
+        run: bash ./gradlew :composeApp:desktopTest :composeApp:createDistributable :composeApp:packageDistributionForCurrentOS --console=plain
       - name: Show Windows packaging diagnostics
         if: failure() && runner.os == 'Windows'
         shell: pwsh
