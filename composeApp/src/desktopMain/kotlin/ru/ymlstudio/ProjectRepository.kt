@@ -42,7 +42,7 @@ class ProjectRepository(val directory: Path) : Closeable {
     }
     private fun decode(path: Path): Project {
         require(Files.size(path) <= 50 * 1024 * 1024) { "Проект больше 50 МБ" }
-        return projectJson.decodeFromString<Project>(path.readText()).also(::checkShape)
+        return projectJson.decodeFromString<Project>(path.readText()).also(::checkShape).withDeliveryDaysMapping()
     }
     fun save(project: Project) {
         checkShape(project)
@@ -98,7 +98,7 @@ class ProjectRepository(val directory: Path) : Closeable {
         val project = decode(source)
         if (source.toAbsolutePath().normalize() == directory.resolve("project.json").toAbsolutePath().normalize()) return project
         val mapping = mutableMapOf<String, String>()
-        val sources = project.products.flatMap { it.pictures }.map { it.file }.filter { it.isNotEmpty() }.distinct().associateWith {
+        val sources = (project.products.flatMap { it.pictures } + project.templates.flatMap { it.defaultPictures }).map { it.file }.filter { it.isNotEmpty() }.distinct().associateWith {
             source.parent.resolve("images").resolve(it).also { path -> require(Files.isRegularFile(path) && !Files.isSymbolicLink(path)) { "Рядом с проектом не найдено фото images/$it" } }
         }
         // Never overwrite images used by the current project, even when importing another copy of it.
@@ -108,7 +108,9 @@ class ProjectRepository(val directory: Path) : Closeable {
             Files.copy(path, directory.resolve("images").resolve(next))
             mapping[name] = next
         }
-        val imported = project.copy(products = project.products.map { p -> p.copy(pictures = p.pictures.map { it.copy(file = mapping[it.file] ?: it.file) }) })
+        fun remap(pictures: List<Picture>) = pictures.map { it.copy(file = mapping[it.file] ?: it.file) }
+        val imported = project.copy(products = project.products.map { p -> p.copy(pictures = remap(p.pictures)) },
+            templates = project.templates.map { t -> t.copy(defaultPictures = remap(t.defaultPictures)) })
         save(imported)
         return imported
     }

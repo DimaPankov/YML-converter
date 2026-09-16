@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.*
@@ -23,9 +24,9 @@ import java.awt.Frame
 import java.nio.file.Path
 import javax.swing.JOptionPane
 
-private val Green = Color(0xFF236C50)
-private val Muted = Color(0xFF738279)
-private val Background = Color(0xFFF5F8F6)
+private val Green: Color @Composable get() = MaterialTheme.colorScheme.primary
+private val Muted: Color @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
+private val Background: Color @Composable get() = MaterialTheme.colorScheme.background
 private val pages = listOf("Товары", "Конструктор форм", "Настройки каталога", "Экспорт YML")
 
 fun main(args: Array<String>) {
@@ -51,11 +52,9 @@ fun main(args: Array<String>) {
         var closeRequest by remember { mutableStateOf(false) }
         Window(onCloseRequest = { closeRequest = true }, title = "YML Студия", state = rememberWindowState(width = 1280.dp, height = 860.dp)) {
             window.minimumSize = java.awt.Dimension(960, 650)
-            MaterialTheme(colorScheme = lightColorScheme(primary = Green, secondary = Green, background = Background, surface = Color.White)) {
                 CompositionLocalProvider(LocalImageDirectory provides repo.directory) {
                     Studio(repo, initial, closeRequest, { closeRequest = false }) { repo.close(); exitApplication() }
                 }
-            }
         }
     }
 }
@@ -83,12 +82,17 @@ internal fun Studio(repo: ProjectRepository, initial: Project, closeRequest: Boo
     var confirm by remember { mutableStateOf<Pair<String, () -> Unit>?>(null) }
     var createProduct by remember { mutableStateOf(false) }
     var copySource by remember { mutableStateOf<Product?>(null) }
-    var copyName by remember { mutableStateOf("") }
+    var copyDraft by remember { mutableStateOf<Product?>(null) }
+    var ymlImport by remember { mutableStateOf<YmlImport?>(null) }
+    var importAsTemplate by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf(emptySet<String>()) }
+    var bulkEdit by remember { mutableStateOf(false) }
+    val selectedTemplateId = saved.products.firstOrNull { it.id in selectedIds }?.templateId
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
     val dirty = draft != saved
     fun navigate(next: Int) {
-        val action = { draft = saved; page = next; productId = null; templateId = null }
+        val action = { draft = saved; page = next; productId = null; templateId = null; selectedIds = emptySet() }
         if (dirty) confirm = "Отменить несохранённые изменения и перейти в другой раздел?" to action else action()
     }
     fun work(success: String? = null, operation: suspend () -> Unit) {
@@ -101,10 +105,27 @@ internal fun Studio(repo: ProjectRepository, initial: Project, closeRequest: Boo
             finally { busy = false }
         }
     }
-    fun commit(next: Project = draft) {
-        work("Изменения сохранены") {
+    fun commit(next: Project = draft, showSuccess: Boolean = true) {
+        work(if (showSuccess) "Изменения сохранены" else null) {
+            val normalized = next.withDeliveryDaysMapping()
+            withContext(Dispatchers.IO) { repo.save(normalized) }
+            saved = normalized; draft = normalized; productId = null; templateId = null
+            selectedIds = emptySet(); bulkEdit = false
+        }
+    }
+    fun loadYml(asTemplate: Boolean) {
+        chooseFile(if (asTemplate) "Загрузить форму из YML" else "Загрузить товары из YML")?.let { source -> work {
+            val preview = withContext(Dispatchers.IO) { readYmlImport(source) }
+            importAsTemplate = asTemplate
+            ymlImport = preview
+        } }
+    }
+    fun changeTheme(dark: Boolean) {
+        work {
+            val next = saved.copy(settings = saved.settings.copy(darkTheme = dark))
             withContext(Dispatchers.IO) { repo.save(next) }
-            saved = next; draft = next; productId = null; templateId = null
+            saved = next
+            draft = draft.copy(settings = draft.settings.copy(darkTheme = dark))
         }
     }
     LaunchedEffect(closeRequest) {
@@ -115,10 +136,10 @@ internal fun Studio(repo: ProjectRepository, initial: Project, closeRequest: Boo
             else exit()
         }
     }
+    StudioTheme(draft.settings.darkTheme) {
     Row(Modifier.fillMaxSize().background(Background)) {
-        Column(Modifier.width(235.dp).fillMaxHeight().background(Color.White).padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.width(235.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surface).padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("YML Студия", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Green)
-            Text("КАТАЛОГ ПОСТАВЩИКА", style = MaterialTheme.typography.labelSmall, color = Muted)
             Spacer(Modifier.height(18.dp))
             Surface(color = Background, shape = RoundedCornerShape(10.dp)) {
                 Column(Modifier.fillMaxWidth().padding(14.dp)) {
@@ -127,19 +148,21 @@ internal fun Studio(repo: ProjectRepository, initial: Project, closeRequest: Boo
                 }
             }
             pages.forEachIndexed { i, label ->
-                TextButton(onClick = { navigate(i) }, enabled = !busy, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.textButtonColors(containerColor = if (page == i) Color(0xFFE7F1EB) else Color.Transparent)) {
+                TextButton(onClick = { navigate(i) }, enabled = !busy, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.textButtonColors(containerColor = if (page == i) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)) {
                     Text(label, Modifier.fillMaxWidth().padding(vertical = 6.dp), color = if (page == i) Green else Muted)
                 }
             }
             Spacer(Modifier.weight(1f))
-            Text("●  Локальное приложение", color = Green, style = MaterialTheme.typography.bodySmall)
-            Text("Данные сохраняются на вашем компьютере", color = Muted, style = MaterialTheme.typography.bodySmall)
-            Text("Версия 2.2.2 · Kotlin KMP", color = Muted, style = MaterialTheme.typography.labelSmall)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (draft.settings.darkTheme) "Тёмная тема" else "Светлая тема", Modifier.weight(1f), color = Muted)
+                Switch(checked = draft.settings.darkTheme, onCheckedChange = ::changeTheme,
+                    enabled = !busy, modifier = Modifier.testTag("sidebar-theme"))
+            }
         }
         Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 28.dp, vertical = 20.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Рабочее пространство  /  ${pages[page]}", color = Muted, style = MaterialTheme.typography.bodySmall)
-                Text(if (busy) "Выполняется операция…" else if (dirty) "Есть несохранённые изменения" else "Все изменения сохранены", color = if (dirty) Color(0xFF9C6B25) else Green, style = MaterialTheme.typography.bodySmall)
+                Text(if (busy) "Выполняется операция…" else if (dirty) "Есть несохранённые изменения" else "Все изменения сохранены", color = if (dirty) MaterialTheme.colorScheme.tertiary else Green, style = MaterialTheme.typography.bodySmall)
             }
             Spacer(Modifier.height(22.dp))
             Box(Modifier.weight(1f)) {
@@ -164,46 +187,63 @@ internal fun Studio(repo: ProjectRepository, initial: Project, closeRequest: Boo
                     templateId != null -> {
                         val t = draft.templates.first { it.id == templateId }
                         TemplateEditor(t, busy, { updated -> draft = draft.copy(templates = draft.templates.map { if (it.id == t.id) updated else it }) },
-                            { commit() }, { navigate(page) }, { title, action -> confirm = title to action })
+                            { commit(saved.updateTemplate(t)) }, { navigate(page) }, { title, action -> confirm = title to action })
                     }
                     page == 0 -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Heading("Товары", "Создавайте карточки, добавляйте фотографии и готовьте каталог к экспорту.") {
-                            Button(onClick = { createProduct = true }, enabled = !busy && saved.templates.isNotEmpty()) { Text("+ Добавить товар") }
+                        Heading("Товары") {
+                            if (selectedIds.isNotEmpty()) {
+                                OutlinedButton(onClick = { commit(saved.deleteProducts(selectedIds), showSuccess = false) }, enabled = !busy,
+                                    modifier = Modifier.testTag("bulk-delete")) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
+                                Button(onClick = { bulkEdit = true }, enabled = !busy, modifier = Modifier.testTag("bulk-edit")) { Text("Изменить") }
+                            } else Button(onClick = { createProduct = true }, enabled = !busy && saved.templates.isNotEmpty()) { Text("+ Добавить товар") }
                         }
+                        OutlinedButton(onClick = { loadYml(false) }, enabled = !busy) { Text("Загрузить товары из YML") }
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Input(search, { search = it }, "Поиск по названию или артикулу", Modifier.weight(1f))
-                            Choice(filter, listOf("" to "Все формы") + saved.templates.map { it.id to it.name }, "Форма", Modifier.width(260.dp)) { filter = it }
+                            Input(search, { search = it; selectedIds = emptySet() }, "Поиск по названию или артикулу", Modifier.weight(1f))
+                            Choice(filter, listOf("" to "Все формы") + saved.templates.map { it.id to it.name }, "Форма", Modifier.width(260.dp)) { filter = it; selectedIds = emptySet() }
                         }
                         val products = saved.products.filter { p ->
                             val v = p.valuesFor(saved.templates.first { it.id == p.templateId })
                             (filter.isEmpty() || filter == p.templateId) && (search.isBlank() || listOf(v["name"], v["id"]).any { it.orEmpty().contains(search, true) })
                         }
-                        if (products.isEmpty()) Empty("Товары не найдены", if (saved.templates.isEmpty()) "Создайте форму в конструкторе, затем добавьте первый товар." else "Добавьте первый товар или измените условия поиска.")
+                        if (selectedIds.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Выбрано: ${selectedIds.size}", color = Green)
+                            TextButton({ selectedIds = products.filter { it.templateId == selectedTemplateId }.map { it.id }.toSet() }, enabled = !busy) { Text("Выбрать все этой формы") }
+                            TextButton({ selectedIds = emptySet() }, enabled = !busy) { Text("Снять выбор") }
+                        }
+                        if (products.isEmpty()) Empty("Товары не найдены")
                         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             items(products, key = { it.id }) { p ->
                                 val t = saved.templates.first { it.id == p.templateId }; val v = p.valuesFor(t)
-                                Panel {
+                                ProductContextMenu(p.id, p.id in selectedIds, selectedTemplateId == null || selectedTemplateId == p.templateId, busy,
+                                    selectionMode = selectedIds.isNotEmpty(),
+                                    toggleSelection = { selectedIds = if (p.id in selectedIds) selectedIds - p.id else selectedIds + p.id },
+                                    edit = { draft = saved; productId = p.id },
+                                    copy = {
+                                        try {
+                                            copyDraft = saved.duplicateProduct(p, newId())
+                                            copySource = p
+                                        } catch (e: Exception) { message = e.message }
+                                    },
+                                    delete = { confirm = "Удалить товар из каталога?" to { commit(saved.copy(products = saved.products.filter { it.id != p.id }), showSuccess = false) } }) {
+                                Panel(selected = p.id in selectedIds) {
                                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                         Column(Modifier.weight(1f)) {
                                             Text(v["name"].orEmpty().ifBlank { "Без названия" }, fontWeight = FontWeight.SemiBold)
                                             Text("${v["id"].orEmpty().ifBlank { "Без артикула" }}  ·  ${t.name}  ·  ${p.pictures.size} фото", color = Muted, style = MaterialTheme.typography.bodySmall)
                                         }
                                         Text(v["price"].orEmpty().ifBlank { "—" } + " ₽", fontWeight = FontWeight.Medium)
-                                        OutlinedButton(onClick = { draft = saved; productId = p.id }, enabled = !busy) { Text("Изменить") }
-                                        OutlinedButton(onClick = {
-                                            copyName = v["name"].orEmpty()
-                                            copySource = p
-                                        }, enabled = !busy) { Text("Копировать") }
-                                        TextButton(onClick = { confirm = "Удалить товар из каталога?" to { commit(saved.copy(products = saved.products.filter { it.id != p.id })) } }, enabled = !busy) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
                                     }
+                                }
                                 }
                             }
                         }
                     }
                     page == 1 -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Heading("Конструктор форм", "Шаблоны полей для ваших товаров.") {
+                        Heading("Конструктор форм") {
                             Button(onClick = { val t = defaultTemplate().copy(id = newId(), name = "Новая форма"); draft = saved.copy(templates = saved.templates + t); templateId = t.id }, enabled = !busy) { Text("+ Создать форму") }
                         }
+                        OutlinedButton(onClick = { loadYml(true) }, enabled = !busy) { Text("Загрузить форму из YML") }
                         LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             items(saved.templates, key = { it.id }) { t -> Panel {
                                 Text(t.name, style = MaterialTheme.typography.titleMedium)
@@ -214,7 +254,7 @@ internal fun Studio(repo: ProjectRepository, initial: Project, closeRequest: Boo
                                     TextButton(onClick = { commit(saved.copy(templates = saved.templates + t.copy(id = newId(), name = t.name + " (копия)"))) }, enabled = !busy) { Text("Копировать") }
                                     TextButton(onClick = {
                                         if (saved.products.any { it.templateId == t.id }) message = "Форма используется товарами. Сначала удалите связанные товары."
-                                        else confirm = "Удалить форму «${t.name}»?" to { commit(saved.copy(templates = saved.templates.filter { it.id != t.id })) }
+                                        else confirm = "Удалить форму «${t.name}»?" to { commit(saved.copy(templates = saved.templates.filter { it.id != t.id }), showSuccess = false) }
                                     }, enabled = !busy) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
                                 }
                             } }
@@ -233,25 +273,38 @@ internal fun Studio(repo: ProjectRepository, initial: Project, closeRequest: Boo
                         chooseFile("Сохранить экспорт", if (bundle) "catalog-with-images.zip" else "catalog.yml")?.let { destination -> work("Экспорт сохранён: $destination") { withContext(Dispatchers.IO) { repo.export(saved, destination, bundle, allowInvalid) } } }
                     }
                 }
-                if (busy) Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = 0.65f)).clickable(enabled = true) {}, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                if (busy) Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.65f)).clickable(enabled = true) {}, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             }
         }
     }
+    if (bulkEdit && selectedIds.isNotEmpty()) BulkEditDialog(saved, selectedIds, busy, { bulkEdit = false }) { changes, regenerateArticles ->
+        work {
+            val next = saved.updateProducts(selectedIds, changes, regenerateArticles)
+            withContext(Dispatchers.IO) { repo.save(next) }
+            saved = next; draft = next; selectedIds = emptySet(); bulkEdit = false
+        }
+    }
     copySource?.let { source ->
+        val template = saved.templates.first { it.id == source.templateId }
+        val copy = copyDraft!!
+        val nameField = template.fields.firstOrNull { it.target == "name" }
         AlertDialog(onDismissRequest = { if (!busy) copySource = null },
             title = { Text("Копировать товар") },
-            text = { OutlinedTextField(value = copyName, onValueChange = { copyName = it },
-                label = { Text("Новое название товара") }, singleLine = true, enabled = !busy) },
-            confirmButton = { Button(enabled = !busy && copyName.isNotBlank(), onClick = {
-                val name = copyName.trim()
-                work {
-                    val template = saved.templates.first { it.id == source.templateId }
-                    val nameField = template.fields.firstOrNull { it.target == "name" }
-                        ?: error("В форме товара отсутствует поле названия")
-                    val copy = saved.duplicateProduct(source, newId()).let {
-                        it.copy(values = it.values + (nameField.id to name))
+            text = {
+                Column(Modifier.width(480.dp).heightIn(max = 440.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    template.copyFields(saved.settings).forEach { field ->
+                        key(field.id) {
+                            FieldValueInput(field, copy.values[field.id].orEmpty(), if (field.target == "name") "Новое название товара" else field.label) { value ->
+                                if (!busy) copyDraft = copy.copy(values = copy.values + (field.id to value))
+                            }
+                        }
                     }
-                    val next = saved.copy(products = saved.products + copy)
+                }
+            },
+            confirmButton = { Button(enabled = !busy && !copy.values[nameField?.id].isNullOrBlank(), onClick = {
+                work {
+                    val result = saved.finishProductCopy(copy, copy.values)
+                    val next = saved.copy(products = saved.products + result)
                     withContext(Dispatchers.IO) { repo.save(next) }
                     saved = next
                     draft = next
@@ -260,6 +313,25 @@ internal fun Studio(repo: ProjectRepository, initial: Project, closeRequest: Boo
                 }
             }) { Text("Сохранить") } },
             dismissButton = { TextButton(enabled = !busy, onClick = { copySource = null }) { Text("Отмена") } })
+    }
+    ymlImport?.let { preview ->
+        YmlImportDialog(preview, importAsTemplate, busy, { ymlImport = null }) { index, name ->
+            work {
+                if (importAsTemplate) {
+                    val template = preview.asTemplate(index, name)
+                    val next = saved.copy(templates = saved.templates + template)
+                    withContext(Dispatchers.IO) { repo.save(next) }
+                    saved = next; draft = next; templateId = template.id
+                } else {
+                    val result = preview.addProductsTo(saved)
+                    withContext(Dispatchers.IO) { repo.save(result.project) }
+                    saved = result.project; draft = result.project; search = ""; filter = ""
+                    message = "Добавлено товаров: ${preview.products.size}." +
+                        if (result.changedArticles > 0) " Новые артикулы назначены: ${result.changedArticles}." else ""
+                }
+                ymlImport = null
+            }
+        }
     }
     if (createProduct) AlertDialog(onDismissRequest = { createProduct = false }, title = { Text("Выберите форму товара") }, text = {
         Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
@@ -276,20 +348,23 @@ internal fun Studio(repo: ProjectRepository, initial: Project, closeRequest: Boo
     confirm?.let { (text, action) -> AlertDialog(onDismissRequest = { confirm = null }, title = { Text("Подтверждение") }, text = { Text(text) },
         confirmButton = { Button(onClick = { confirm = null; action() }) { Text("Продолжить") } }, dismissButton = { TextButton(onClick = { confirm = null }) { Text("Отмена") } }) }
     message?.let { text -> AlertDialog(onDismissRequest = { message = null }, title = { Text("YML Студия") }, text = { Text(text, Modifier.heightIn(max = 450.dp).verticalScroll(rememberScrollState())) }, confirmButton = { TextButton(onClick = { message = null }) { Text("ОК") } }) }
+    }
 }
 
-@Composable private fun Heading(title: String, subtitle: String, actions: @Composable RowScope.() -> Unit = {}) {
+@Composable private fun Heading(title: String, subtitle: String = "", actions: @Composable RowScope.() -> Unit = {}) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) { Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold); Text(subtitle, color = Muted, style = MaterialTheme.typography.bodyMedium) }
+        Column(Modifier.weight(1f)) { Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold); if (subtitle.isNotEmpty()) Text(subtitle, color = Muted, style = MaterialTheme.typography.bodyMedium) }
         actions()
     }
 }
-@Composable private fun Panel(content: @Composable ColumnScope.() -> Unit) {
-    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, Color(0xFFE0E8E2))) {
+@Composable private fun Panel(selected: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant)) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
     }
 }
-@Composable private fun Empty(title: String, text: String) { Panel { Text(title, style = MaterialTheme.typography.titleLarge); Text(text, color = Muted) } }
+@Composable private fun Empty(title: String) { Panel { Text(title, style = MaterialTheme.typography.titleLarge) } }
 @Composable private fun Input(value: String, onChange: (String) -> Unit, label: String, modifier: Modifier = Modifier.fillMaxWidth(), multiline: Boolean = false) {
     OutlinedTextField(value, onChange, modifier, label = { Text(label) }, singleLine = !multiline, minLines = if (multiline) 3 else 1, shape = RoundedCornerShape(8.dp))
 }
@@ -320,16 +395,13 @@ private fun <T> List<T>.move(index: Int, delta: Int): List<T> = toMutableList().
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Heading("Карточка товара", t.name) { OutlinedButton(cancel, enabled = !busy) { Text("Отмена") }; Button(save, enabled = !busy) { Text("Сохранить") } }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            item { Text("Звёздочкой отмечены обязательные поля. Укажите реальные регионы, стоимость и срок доставки. Неполные карточки можно сохранять как черновики.", color = Muted) }
             items(t.cardFields(project.settings), key = { it.id }) { f ->
                 val value = p.values[f.id].orEmpty(); val label = f.label + (if (f.required) " *" else "") + if (f.unit.isNotEmpty()) " (${f.unit})" else ""
                 val change: (String) -> Unit = { update(p.copy(values = p.values + (f.id to it))) }
                 FieldValueInput(f, value, label, onChange = change)
-                f.catalogHint()?.let { Text(it, color = Muted, style = MaterialTheme.typography.bodySmall) }
             }
             item { Panel {
                 Text("Фотографии (${p.pictures.size}/10)", style = MaterialTheme.typography.titleLarge)
-                Text("Первое фото — основное. JPEG/PNG, 250–3500 px, до 15 МБ. Для файлов укажите публичный адрес папки в настройках или отдельную ссылку.", color = Muted)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedButton(upload, enabled = !busy && p.pictures.size < 10) { Text("Загрузить файл") }
                     OutlinedButton({ update(p.copy(pictures = p.pictures + Picture())) }, enabled = !busy && p.pictures.size < 10) { Text("Добавить ссылку") }
@@ -374,12 +446,40 @@ private fun <T> List<T>.move(index: Int, delta: Int): List<T> = toMutableList().
 }
 private val LocalImageDirectory = staticCompositionLocalOf { defaultDataDirectory() }
 
+@Composable internal fun YmlImportDialog(preview: YmlImport, asTemplate: Boolean, busy: Boolean,
+    dismiss: () -> Unit, apply: (Int, String) -> Unit) {
+    var selected by remember(preview) { mutableIntStateOf(0) }
+    var name by remember(preview) { mutableStateOf(preview.template.name) }
+    AlertDialog(onDismissRequest = { if (!busy) dismiss() }, title = { Text(if (asTemplate) "Загрузить форму" else "Загрузить товары") },
+        text = {
+            Column(Modifier.width(480.dp).heightIn(max = 440.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("В файле товаров: ${preview.products.size}.")
+                if (asTemplate) {
+                    Input(name, { name = it }, "Название новой формы")
+                    Text("Форм: ${preview.formGroups.size}")
+                    if (preview.formGroups.size > 1) {
+                        Choice(selected.toString(), preview.formGroups.mapIndexed { index, group ->
+                            group.productIndex.toString() to "Форма ${index + 1} · ${group.productCount} товаров · ${preview.products[group.productIndex].values["name"].orEmpty().ifBlank { "Без названия" }}"
+                        }, "Форма из файла") { selected = it.toInt() }
+                    }
+                }
+            }
+        },
+        confirmButton = { Button(onClick = { apply(selected, name) }, enabled = !busy && (!asTemplate || name.isNotBlank())) { Text(if (asTemplate) "Добавить форму" else "Добавить товары") } },
+        dismissButton = { TextButton(onClick = dismiss, enabled = !busy) { Text("Отмена") } })
+}
+
 @Composable private fun TemplateEditor(t: Template, busy: Boolean, update: (Template) -> Unit, save: () -> Unit, cancel: () -> Unit, confirm: (String, () -> Unit) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Heading("Редактор формы", "Изменения применяются ко всем товарам этой формы.") { OutlinedButton(cancel, enabled = !busy) { Text("Отмена") }; Button(save, enabled = !busy) { Text("Сохранить") } }
+        Heading("Редактор формы") { OutlinedButton(cancel, enabled = !busy) { Text("Отмена") }; Button(save, enabled = !busy) { Text("Сохранить") } }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             item { Input(t.name, { update(t.copy(name = it)) }, "Название формы") }
             item { Input(t.description, { update(t.copy(description = it)) }, "Описание формы", multiline = true) }
+            if (t.defaultPictures.isNotEmpty()) item { Panel {
+                Text("Фотографии новых товаров: ${t.defaultPictures.size}", fontWeight = FontWeight.Medium)
+                t.defaultPictures.forEach { Text(it.url.ifBlank { it.name }, color = Muted) }
+                TextButton({ update(t.copy(defaultPictures = emptyList())) }, enabled = !busy) { Text("Убрать фотографии из формы") }
+            } }
             items(t.fields.size, key = { t.fields[it].id }) { index ->
                 val f = t.fields[index]
                 fun change(next: Field) { update(t.copy(fields = t.fields.mapIndexed { i, field -> if (i == index) next else field })) }
@@ -388,7 +488,7 @@ private val LocalImageDirectory = staticCompositionLocalOf { defaultDataDirector
                         Text("${index + 1}. ${f.label}", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
                         TextButton({ update(t.copy(fields = t.fields.move(index, -1))) }, enabled = index > 0) { Text("↑") }
                         TextButton({ update(t.copy(fields = t.fields.move(index, 1))) }, enabled = index < t.fields.lastIndex) { Text("↓") }
-                        TextButton({ confirm("Удалить поле? После сохранения оно перестанет выводиться и экспортироваться у товаров этой формы.") { update(t.copy(fields = t.fields.filterIndexed { i, _ -> i != index })) } }) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
+                        TextButton({ confirm("Удалить поле из формы и её товаров?") { update(t.copy(fields = t.fields.filterIndexed { i, _ -> i != index })) } }) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Input(f.label, { change(f.copy(label = it)) }, "Название поля", Modifier.weight(1f))
@@ -403,8 +503,7 @@ private val LocalImageDirectory = staticCompositionLocalOf { defaultDataDirector
                     }
                     FieldChoiceConfiguration(f, ::change)
                     Toggle(f.required, "Требовать заполнение в этой форме") { change(f.copy(required = it)) }
-                    if (fieldDefinitions.any { it.target == f.target && it.required }) Text("Это поле входит в обязательные данные импорта. Снятие требования формы не отключает проверку экспорта.", color = Muted)
-                    f.catalogHint()?.let { Text(it, color = Muted, style = MaterialTheme.typography.bodySmall) }
+                    if (f.target != "name") Toggle(f.quickAccess, "Быстрый доступ при копировании товара") { change(f.copy(quickAccess = it)) }
                 }
             }
             item { AddFieldButtons(t.fields, ::newId) { update(t.copy(fields = t.fields + it)) } }
@@ -415,8 +514,15 @@ private val LocalImageDirectory = staticCompositionLocalOf { defaultDataDirector
 @Composable private fun SettingsEditor(project: Project, busy: Boolean, update: (Project) -> Unit, save: () -> Unit, directory: String, backup: () -> Unit, import: () -> Unit) {
     val s = project.settings
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Heading("Настройки каталога", "Магазин, категории и хранение данных.") { Button(save, enabled = !busy) { Text("Сохранить") } }
+        Heading("Настройки каталога") { Button(save, enabled = !busy) { Text("Сохранить") } }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            item { Panel {
+                Text("Оформление", style = MaterialTheme.typography.titleLarge)
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    FilterChip(selected = !s.darkTheme, onClick = { update(project.copy(settings = s.copy(darkTheme = false))) }, label = { Text("Светлая") }, enabled = !busy)
+                    FilterChip(selected = s.darkTheme, onClick = { update(project.copy(settings = s.copy(darkTheme = true))) }, label = { Text("Тёмная") }, enabled = !busy)
+                }
+            } }
             item { Panel {
                 Text("Магазин", style = MaterialTheme.typography.titleLarge)
                 Input(s.name, { update(project.copy(settings = s.copy(name = it))) }, "Название магазина")
@@ -424,12 +530,10 @@ private val LocalImageDirectory = staticCompositionLocalOf { defaultDataDirector
                 Input(s.url, { update(project.copy(settings = s.copy(url = it))) }, "Сайт магазина")
                 Input(s.imageBase, { update(project.copy(settings = s.copy(imageBase = it))) }, "Публичный адрес папки фотографий, например https://example.ru/images")
                 Toggle(s.useVat, "Передавать НДС (значение из справочника портала)") { update(project.copy(settings = s.copy(useVat = it))) }
-                Text("В каждой карточке укажите ID категории из справочника портала. Категория поставщика создаётся автоматически; её ID вводить не нужно.", color = Muted)
             } }
             item { Panel {
                 Text("Рабочие данные", style = MaterialTheme.typography.titleLarge)
                 androidx.compose.foundation.text.selection.SelectionContainer { Text(directory, color = Muted) }
-                Text("Резервная копия содержит сохранённый проект и все загруженные фотографии. Для переноса старого проекта выберите project.json; папка images должна находиться рядом с ним.", color = Muted)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedButton(backup, enabled = !busy) { Text("Резервная копия ZIP") }
                     OutlinedButton(import, enabled = !busy) { Text("Импорт project.json") }
@@ -447,12 +551,12 @@ private val LocalImageDirectory = staticCompositionLocalOf { defaultDataDirector
     }
     pendingBundle?.let { bundle ->
         AlertDialog(onDismissRequest = { pendingBundle = null }, title = { Text("Сохранить с ошибками?") },
-            text = { Text("В каталоге ошибок: ${report.errors.size}. Файл будет сохранён, но портал может его не принять.") },
+            text = { Text("Ошибок: ${report.errors.size}. Портал может отклонить файл.") },
             confirmButton = { Button({ pendingBundle = null; export(bundle, true) }, enabled = !busy) { Text("Сохранить всё равно") } },
             dismissButton = { TextButton({ pendingBundle = null }) { Text("Отмена") } })
     }
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Heading("Экспорт YML", "Проверка сохранённых товаров перед загрузкой на портал.")
+        Heading("Экспорт YML")
         Panel {
             Text(if (report.errors.isEmpty()) "Каталог готов к экспорту" else "Обнаружены ошибки: ${report.errors.size}", color = if (report.errors.isEmpty()) Green else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.titleLarge)
             Text("${project.products.size} товаров · UTF-8 · RUB", color = Muted)
@@ -463,12 +567,6 @@ private val LocalImageDirectory = staticCompositionLocalOf { defaultDataDirector
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(report.errors) { Text("• $it", color = MaterialTheme.colorScheme.error) }
-            items(report.warnings) { Text("• $it", color = Color(0xFF90651F)) }
-            item { Panel {
-                Text("После экспорта", style = MaterialTheme.typography.titleMedium)
-                Text("Разместите содержимое images/ из архива по указанному публичному адресу, сохранив имена файлов, затем загрузите catalog.yml на портал. Программа не размещает фото в интернете.", color = Muted)
-                Text("Сохранены правила исходной версии проекта. Полная XSD-валидация и проверка кодов по справочникам портала не выполняются; окончательная проверка происходит при импорте на портал.", color = Muted)
-            } }
         }
     }
 }

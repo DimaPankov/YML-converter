@@ -3,8 +3,41 @@ package ru.ymlstudio
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class ProductCopyTest {
+    @Test fun quickCopyChangesSelectedFieldsAndRejectsDuplicateArticle() {
+        val template = Template("t", "Форма", fields = listOf(
+            Field("sku", "id", "Артикул", quickAccess = true),
+            Field("title", "name", "Название"),
+            Field("cost", "price", "Цена", quickAccess = true),
+            Field("color", "param", "Цвет", quickAccess = true),
+            Field("hidden", "param", "Материал")
+        ))
+        val source = Product("source", "t", mapOf("sku" to "A1", "title" to "Майка", "cost" to "100", "color" to "Красный", "hidden" to "Хлопок"))
+        val project = defaultProject().copy(templates = listOf(template), products = listOf(source))
+        val draft = project.duplicateProduct(source, "copy")
+        val edited = project.finishProductCopy(draft, mapOf("title" to " Майка XL ", "cost" to "200", "color" to "Белый", "hidden" to "Не менять"))
+        assertEquals("Майка XL", edited.values["title"])
+        assertEquals("200", edited.values["cost"])
+        assertEquals("Белый", edited.values["color"])
+        assertEquals("Хлопок", edited.values["hidden"])
+        assertEquals("100", source.values["cost"])
+        assertFailsWith<IllegalArgumentException> { project.finishProductCopy(draft, mapOf("sku" to "A1")) }
+        assertFailsWith<IllegalArgumentException> { project.finishProductCopy(draft, mapOf("title" to " ")) }
+        assertFailsWith<IllegalArgumentException> { project.finishProductCopy(draft, mapOf("sku" to "!")) }
+    }
+
+    @Test fun oldFormsDecodeWithoutQuickAccessAndVatFollowsSettings() {
+        val field = projectJson.decodeFromString<Field>("""{"id":"price","target":"price","label":"Цена"}""")
+        assertFalse(field.quickAccess)
+        val template = defaultTemplate().copy(fields = defaultTemplate().fields.map { it.copy(quickAccess = it.target == "vat") })
+        assertEquals(listOf("name"), template.copyFields(Settings()).map { it.target })
+        assertEquals(listOf("name", "vat"), template.copyFields(Settings(useVat = true)).map { it.target })
+    }
+
     @Test fun newProductsGetUniqueArticlesAcrossFormsIgnoringFormDefault() {
         val firstForm = defaultTemplate()
         val secondForm = firstForm.copy(id = "other", fields = firstForm.fields.map {
@@ -12,12 +45,14 @@ class ProductCopyTest {
         })
         val initial = defaultProject().copy(templates = listOf(firstForm, secondForm))
         val first = initial.createProduct("first", firstForm)
-        assertEquals("1", first.values["id"])
+        assertTrue(isValidArticle(first.values.getValue("id")))
+        assertEquals(12, first.values.getValue("id").length)
         val pair = initial.copy(products = listOf(first))
         val second = pair.createProduct("second", secondForm)
-        assertEquals("2", second.values["customSku"])
+        assertTrue(isValidArticle(second.values.getValue("customSku")))
+        assertNotEquals("1", second.values["customSku"])
         val third = pair.copy(products = listOf(first, second)).createProduct("third", firstForm)
-        assertEquals("3", third.values["id"])
+        assertEquals(3, setOf(first.values["id"], second.values["customSku"], third.values["id"]).size)
     }
 
     @Test fun copyPreservesCustomFieldsAndPhotosAndAllocatesUniqueArticleAcrossForms() {
@@ -33,7 +68,9 @@ class ProductCopyTest {
             source, Product("existing", otherForm.id, mapOf("otherSku" to "438C1"))))
         val copy = project.duplicateProduct(source, "copy")
         assertNotEquals(source.id, copy.id)
-        assertEquals("438C2", copy.values["sku"])
+        assertTrue(isValidArticle(copy.values.getValue("sku")))
+        assertEquals(12, copy.values.getValue("sku").length)
+        assertFalse(copy.values["sku"] in project.usedArticles())
         assertEquals(source.values - "sku", copy.values - "sku")
         assertEquals(source.pictures, copy.pictures)
         assertEquals(source.templateId, copy.templateId)
@@ -42,6 +79,7 @@ class ProductCopyTest {
         assertEquals(2, source.pictures.size)
         assertEquals("Новое название", edited.values["title"])
         val next = project.copy(products = project.products + edited).duplicateProduct(source, "next")
-        assertEquals("438C3", next.values["sku"])
+        assertTrue(isValidArticle(next.values.getValue("sku")))
+        assertFalse(next.values["sku"] in project.usedArticles() + copy.values.getValue("sku"))
     }
 }

@@ -29,7 +29,10 @@ class CatalogTest {
         assertTrue(validate(triple).errors.isEmpty())
         val yml = buildYml(triple)
         assertEquals(3, Regex("<offer id=").findAll(yml).count())
-        for (id in listOf("438", "438C1", "438C1C1")) assertTrue("<offer id=\"$id\"" in yml)
+        val articles = triple.products.map { it.values.getValue("id") }
+        assertEquals(3, articles.distinct().size)
+        assertEquals("438", articles.first())
+        for (id in articles) assertTrue("<offer id=\"$id\"" in yml)
     }
 
     @Test fun okeiAlwaysContainsNameForKnownCodesIncludingExistingProducts() {

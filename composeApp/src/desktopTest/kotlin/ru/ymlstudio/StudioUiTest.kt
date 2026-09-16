@@ -16,6 +16,58 @@ import java.nio.file.Path
 import kotlin.test.assertEquals
 
 class StudioUiTest {
+    @Test fun quickAccessFieldsCanBeEditedInCopyDialogAndCancelDiscardsThem() {
+        ProjectRepository(Files.createTempDirectory("yml-quick-copy-ui")).use { repo ->
+            val template = defaultTemplate().copy(fields = defaultTemplate().fields.map {
+                it.copy(quickAccess = it.target == "price")
+            } + Field("color", "param", "Цвет", quickAccess = true))
+            val source = newProduct("source", template).copy(values = mapOf("id" to "12", "name" to "Майка", "price" to "100", "color" to "Красный"))
+            val initial = defaultProject().copy(templates = listOf(template), products = listOf(source))
+            repo.save(initial)
+            compose.setContent { MaterialTheme { Box(Modifier.size(1280.dp, 860.dp)) { Studio(repo, initial, false, {}, {}) } } }
+            compose.onNodeWithText("Загрузить товары из YML").assertExists()
+            compose.productAction("source", "Копировать")
+            compose.onNodeWithText("Цена", substring = false).performTextReplacement("999")
+            compose.onNodeWithText("Отмена").performClick()
+            assertEquals(1, repo.load().products.size)
+            compose.productAction("source", "Копировать")
+            compose.onNodeWithText("Цена", substring = false).assertTextContains("100")
+            compose.onNodeWithText("Новое название товара").performTextReplacement("Майка XL")
+            compose.onNodeWithText("Цена", substring = false).performTextReplacement("200")
+            compose.onNodeWithText("Цвет", substring = false).performTextReplacement("Белый")
+            compose.onNodeWithText("Сохранить").performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("Копировать товар").fetchSemanticsNodes().isEmpty() }
+            val restored = repo.load()
+            assertEquals(source, restored.products.first())
+            assertEquals("200", restored.products.last().values["price"])
+            assertEquals("Белый", restored.products.last().values["color"])
+            compose.onNodeWithText("Конструктор форм", substring = false).performClick()
+            compose.onNodeWithText("Загрузить форму из YML").assertExists()
+        }
+    }
+
+    @Test fun importFormDialogSelectsFilledOfferAndAcceptsNewName() {
+        val preview = parseYmlImport("<offers><offer id=\"1\"><name>Первая</name></offer><offer id=\"2\"><name>Вторая</name><param name=\"Размер\">XL</param></offer></offers>".toByteArray(), "Файл")
+        var selected: Pair<Int, String>? = null
+        compose.setContent { MaterialTheme { YmlImportDialog(preview, true, false, {}) { index, name -> selected = index to name } } }
+        compose.onNodeWithText("Название новой формы").performTextReplacement("Моя форма")
+        compose.onNodeWithText("Форма из файла").performClick()
+        compose.onNodeWithText("Форма 2 · 1 товаров · Вторая").performClick()
+        compose.onNodeWithText("Добавить форму").performClick()
+        compose.runOnIdle { assertEquals(1 to "Моя форма", selected) }
+    }
+
+    @Test fun importSingleStructureDoesNotShowDuplicateProducts() {
+        val preview = parseYmlImport("<offers><offer id=\"1\"><name>Первая</name></offer><offer id=\"2\"><name>Вторая</name></offer></offers>".toByteArray(), "Файл")
+        var selected: Int? = null
+        compose.setContent { MaterialTheme { YmlImportDialog(preview, true, false, {}) { index, _ -> selected = index } } }
+        compose.onNodeWithText("Форм: 1").assertExists()
+        compose.onNodeWithText("Форма из файла").assertDoesNotExist()
+        compose.onNodeWithText("Вторая", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Добавить форму").performClick()
+        compose.runOnIdle { assertEquals(0, selected) }
+    }
+
     @Test fun vatAllowsOnlyOfficialSelectionEvenForLegacyTextConfiguration() {
         var selected by mutableStateOf("5")
         val field = Field("vat", "vat", "Ставка НДС", inputMode = "text", dictionary = "custom",
@@ -54,7 +106,7 @@ class StudioUiTest {
             val initial = defaultProject().copy(settings = Settings(useVat = true), products = listOf(source))
             repo.save(initial)
             compose.setContent { MaterialTheme { Box(Modifier.size(1280.dp, 860.dp)) { Studio(repo, initial, false, {}, {}) } } }
-            compose.onNodeWithText("Копировать").performClick()
+            compose.productAction("source", "Копировать")
             compose.onNodeWithText("Новое название товара").assertTextContains("Исходная футболка")
             compose.onNodeWithText("Сохранить").assertIsEnabled()
             compose.onNodeWithText("Новое название товара").performTextReplacement("")
@@ -66,7 +118,7 @@ class StudioUiTest {
             val copy = repo.load().products.last()
             assertEquals(source.values - setOf("id", "name"), copy.values - setOf("id", "name"))
             assertEquals(source.pictures, copy.pictures)
-            compose.onAllNodesWithText("Изменить")[1].performClick()
+            compose.productAction(copy.id, "Изменить")
             compose.onNodeWithText("Название товара *").assertTextContains("Копия футболки")
             compose.onNodeWithText("Цена *").assertTextContains("667.50")
             compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Фотографии (1/10)"))
@@ -82,7 +134,7 @@ class StudioUiTest {
         } }
         compose.onNodeWithText("+ Поле со своим списком").performClick()
         compose.onNodeWithText("+ Добавить вариант").performClick()
-        compose.onNodeWithText("Значение 1").performTextInput("Синий")
+        compose.onNodeWithText("Вариант 1").performTextInput("Синий")
         compose.runOnIdle {
             assertEquals("both", field!!.effectiveInputMode())
             assertEquals("Синий", field!!.options.single().value)
@@ -128,9 +180,10 @@ class StudioUiTest {
         compose.onNodeWithText("Страна происхождения (код ОКСМ)").performClick()
         compose.runOnIdle { assertEquals(251, added!!.choices().size); added = Field("custom", "param", "Мой размер", inputMode = "select", dictionary = "custom") }
         compose.onNodeWithText("+ Добавить вариант").performClick()
-        compose.onNodeWithText("Значение 1").performTextInput("XL")
-        compose.onNodeWithText("Подпись 1").performTextInput("Очень большой")
-        compose.runOnIdle { assertEquals(listOf(FieldOption("XL", "Очень большой")), added!!.options) }
+        compose.onNodeWithText("Вариант 1").performTextInput("Синий")
+        compose.onNodeWithText("+ Добавить вариант").performClick()
+        compose.onNodeWithText("Вариант 2").performTextInput("Красный")
+        compose.runOnIdle { assertEquals(listOf(FieldOption("Синий"), FieldOption("Красный")), added!!.options) }
     }
 
     @Test fun categorySearchSelectsRealIdAndManualCountryCodeShowsName() {
@@ -153,8 +206,9 @@ class StudioUiTest {
         compose.onAllNodes(hasSetTextAction()).assertCountEquals(0)
         compose.onNodeWithText("Выбрать из списка").performClick()
         compose.onNodeWithText("Поиск по коду или названию").performTextInput("Большой")
-        compose.onNodeWithText("L — Большой").performClick()
-        compose.runOnIdle { assertEquals("L", value); field = field.copy(inputMode = "both") }
+        compose.onNodeWithText("L — Большой").assertDoesNotExist()
+        compose.onNode(hasText("Большой") and !hasSetTextAction()).performClick()
+        compose.runOnIdle { assertEquals("Большой", value); field = field.copy(inputMode = "both") }
         compose.onNodeWithText("Размер").performTextReplacement("XL")
         compose.runOnIdle { assertEquals("XL", value) }
     }

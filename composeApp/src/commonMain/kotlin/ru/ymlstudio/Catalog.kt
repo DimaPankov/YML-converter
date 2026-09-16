@@ -23,6 +23,9 @@ fun validate(project: Project): ValidationReport {
     project.products.forEachIndexed { index, p ->
         val t = project.templates.first { it.id == p.templateId }
         val v = p.valuesFor(t, s)
+        if (t.fields.any { it.isDeliveryDaysParameter() && p.values[it.id].orEmpty().isNotBlank() }) {
+            warnings += "Товар ${index + 1}: одноимённая характеристика срока доставки не заменяет поле deliveryDays. Проверьте оба значения."
+        }
         fun value(key: String) = v[key].orEmpty()
         val prefix = "Товар ${index + 1} (${value("name").ifEmpty { "без названия" }}): "
         fun error(message: String) { errors += prefix + message }
@@ -41,7 +44,7 @@ fun validate(project: Project): ValidationReport {
             if (f.target !in listOf("vat", "okei") && text.isNotEmpty() && f.type == "number" && decimalCompare(text, "0") == null) error("«${f.label}»: требуется число.")
         }
         if (value("id").isBlank()) error("укажите артикул.")
-        if (value("id").isNotBlank() && !Regex("[A-Za-z0-9]{1,20}").matches(value("id")))
+        if (value("id").isNotBlank() && !isValidArticle(value("id")))
             error("Артикул: по инструкции портала нужны только латинские буквы и цифры, не более 20 символов. Дефисы и пробелы недопустимы.")
         if (!seen.add(value("id"))) error("артикул повторяется.")
         if (currencyValue(value("currencyId")) !in supportedCurrencies) error("Валюта не поддерживается XSD портала. Выберите RUB, RUR, USD, EUR, BYR, BYN, KZT или UAH.")

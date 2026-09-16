@@ -49,7 +49,9 @@ class DictionaryTest {
         assertTrue(buildYml(both).contains("<param name=\"Размер\">X</param>"))
         assertEquals(both, projectJson.decodeFromString<Project>(projectJson.encodeToString(Project.serializer(), both)))
         assertEquals("S", newProduct("new", p.templates.single()).values["size"])
-        assertEquals("L — Большой", field.valueDescription("L"))
+        assertEquals("L", field.valueDescription("L"))
+        assertEquals(listOf("S", "Маленький", "L", "Большой"), field.choices().map { it.value })
+        assertTrue(field.acceptsChoice("Большой"))
         assertTrue(field.copy(dictionary = "country").choices().size == 251)
     }
     @Test fun knownManualCodesAreAcceptedInSelectOnlyFieldsAndRegionChoicesAppend() {

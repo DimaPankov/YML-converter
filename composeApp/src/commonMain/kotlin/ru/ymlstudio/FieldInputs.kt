@@ -54,7 +54,7 @@ import androidx.compose.ui.unit.dp
                         Column(Modifier.fillMaxWidth()) {
                             Text(choice.label)
                             if (choice.detail.isNotEmpty()) Text(choice.detail, style = MaterialTheme.typography.bodySmall)
-                            if (!choice.selectable) Text("Выберите конечную категорию или запись с названием", style = MaterialTheme.typography.bodySmall)
+                            if (!choice.selectable) Text("Недоступно для выбора", style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
@@ -84,17 +84,16 @@ import androidx.compose.ui.unit.dp
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SmallChoice(field.effectiveInputMode(), "Способ заполнения", listOf("text" to "Только ввод", "select" to "Только список", "both" to "Ввод и список")) { onChange(field.copy(inputMode = it)) }
         SmallChoice(field.dictionary, "Источник вариантов", listOf("" to "По назначению поля", "custom" to "Мой список") + dictionaryTitles) { onChange(field.copy(dictionary = it, inputMode = if (it == "custom" && field.effectiveInputMode() == "text") "both" else field.inputMode)) }
-        if (field.dictionaryKey().isNotEmpty()) Text("Справочник: ${field.choices().size} записей. Поиск доступен при заполнении карточки и значения по умолчанию.", style = MaterialTheme.typography.bodySmall)
+        if (field.dictionaryKey().isNotEmpty()) Text("Записей: ${field.choices().size}", style = MaterialTheme.typography.bodySmall)
         else if (field.dictionary == "custom" || field.effectiveInputMode() != "text" || field.options.isNotEmpty()) {
-            Text("Свои варианты: значение попадёт в YML, подпись поможет при выборе. Подпись можно оставить пустой.", style = MaterialTheme.typography.bodySmall)
-            field.options.forEachIndexed { index, option ->
+            val options = field.customListOptions()
+            options.forEachIndexed { index, option ->
                 Column {
-                    OutlinedTextField(option.value, { value -> onChange(field.copy(options = field.options.mapIndexed { i, old -> if (i == index) old.copy(value = value) else old })) }, label = { Text("Значение ${index + 1}") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(option.label, { text -> onChange(field.copy(options = field.options.mapIndexed { i, old -> if (i == index) old.copy(label = text) else old })) }, label = { Text("Подпись ${index + 1}") }, modifier = Modifier.fillMaxWidth())
-                    TextButton({ onChange(field.copy(options = field.options.filterIndexed { i, _ -> i != index })) }) { Text("Удалить вариант ${index + 1}") }
+                    OutlinedTextField(option.value, { value -> onChange(field.copy(options = options.mapIndexed { i, old -> if (i == index) old.copy(value = value) else old })) }, label = { Text("Вариант ${index + 1}") }, modifier = Modifier.fillMaxWidth())
+                    TextButton({ onChange(field.copy(options = options.filterIndexed { i, _ -> i != index })) }) { Text("Удалить вариант ${index + 1}") }
                 }
             }
-            OutlinedButton({ onChange(field.copy(options = field.options + FieldOption(""))) }) { Text("+ Добавить вариант") }
+            OutlinedButton({ onChange(field.copy(options = options + FieldOption(""))) }) { Text("+ Добавить вариант") }
         }
         FieldValueInput(field, field.default, "Значение для новых карточек") { onChange(field.copy(default = it)) }
     }

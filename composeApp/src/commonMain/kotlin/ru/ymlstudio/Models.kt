@@ -3,10 +3,10 @@ package ru.ymlstudio
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-@Serializable data class Settings(val name: String = "", val company: String = "", val url: String = "", val imageBase: String = "", val useVat: Boolean = false, val usePortalCategories: Boolean = true)
+@Serializable data class Settings(val name: String = "", val company: String = "", val url: String = "", val imageBase: String = "", val useVat: Boolean = false, val usePortalCategories: Boolean = true, val darkTheme: Boolean = false)
 @Serializable data class Category(val id: String = "", val name: String = "", val parentId: String = "")
-@Serializable data class Field(val id: String, val target: String, val label: String, val type: String = "text", val required: Boolean = false, val unit: String = "", val default: String = "", val inputMode: String = "auto", val dictionary: String = "", val options: List<FieldOption> = emptyList())
-@Serializable data class Template(val id: String, val name: String, val description: String = "", val fields: List<Field>)
+@Serializable data class Field(val id: String, val target: String, val label: String, val type: String = "text", val required: Boolean = false, val unit: String = "", val default: String = "", val inputMode: String = "auto", val dictionary: String = "", val options: List<FieldOption> = emptyList(), val quickAccess: Boolean = false)
+@Serializable data class Template(val id: String, val name: String, val description: String = "", val fields: List<Field>, val defaultPictures: List<Picture> = emptyList())
 @Serializable data class Picture(val url: String = "", val file: String = "", val width: Int = 0, val height: Int = 0, val name: String = "")
 @Serializable data class Product(val id: String, val templateId: String, val values: Map<String, String> = emptyMap(), val pictures: List<Picture> = emptyList())
 @Serializable data class Project(val version: Int = 1, val settings: Settings, val categories: List<Category>, val templates: List<Template>, val products: List<Product>, val minimalPresetInstalled: Boolean = false, val importRulesVersion: Int = 0, val universalFormUnified: Boolean = false)
@@ -52,18 +52,29 @@ fun defaultTemplate() = Template("basic", "Универсальная форма
 fun defaultProject() = Project(settings = Settings(), categories = emptyList(), templates = listOf(defaultTemplate()), products = emptyList(),
     minimalPresetInstalled = true, importRulesVersion = 1, universalFormUnified = true)
 fun Product.valuesFor(template: Template, settings: Settings? = null) = (if (settings == null) template.fields else template.cardFields(settings)).filter { it.target != "param" }.associate { it.target to values[it.id].orEmpty().trim() }
-fun newProduct(id: String, template: Template) = Product(id, template.id, template.fields.associate { it.id to it.default })
+fun newProduct(id: String, template: Template) = Product(id, template.id, template.fields.associate { it.id to it.default }, template.defaultPictures)
+
+/** Name remains available for older projects; other fields are selected in the form editor. */
+fun Template.copyFields(settings: Settings): List<Field> = cardFields(settings).filter { it.target == "name" || it.quickAccess }
+
+fun Project.finishProductCopy(copy: Product, edits: Map<String, String>): Product {
+    val template = templates.first { it.id == copy.templateId }
+    val allowed = template.copyFields(settings).map { it.id }.toSet()
+    val result = copy.copy(values = copy.values + edits.filterKeys { it in allowed }.mapValues { it.value.trim() })
+    val values = result.valuesFor(template)
+    require(!values["name"].isNullOrBlank()) { "Укажите название товара" }
+    val article = values["id"].orEmpty()
+    require(isValidArticle(article)) { "Артикул: от 1 до 20 латинских букв или цифр" }
+    require(products.none { p -> p.valuesFor(templates.first { it.id == p.templateId })["id"] == article }) { "Этот артикул уже используется" }
+    return result
+}
 
 fun Project.createProduct(id: String, template: Template): Product {
     require(id.isNotBlank() && products.none { it.id == id }) { "ID товара должен быть уникальным" }
     val idField = template.fields.firstOrNull { it.target == "id" }
         ?: error("В форме товара отсутствует поле артикула")
-    val used = products.map { product ->
-        product.valuesFor(templates.first { it.id == product.templateId })["id"].orEmpty()
-    }.toSet()
-    var number = 1L
-    while (number.toString() in used) number++
-    return newProduct(id, template).let { it.copy(values = it.values + (idField.id to number.toString())) }
+    val article = randomArticle(usedArticles() + idField.default)
+    return newProduct(id, template).let { it.copy(values = it.values + (idField.id to article)) }
 }
 
 /** Create an unsaved independent card, reusing immutable photo references. */
@@ -72,17 +83,7 @@ fun Project.duplicateProduct(source: Product, id: String): Product {
     val template = templates.first { it.id == source.templateId }
     val idField = template.fields.firstOrNull { it.target == "id" }
         ?: error("В форме товара отсутствует поле артикула")
-    val used = products.map { product ->
-        product.valuesFor(templates.first { it.id == product.templateId })["id"].orEmpty()
-    }.toSet()
-    val base = source.values[idField.id].orEmpty().filter { it in '0'..'9' || it in 'a'..'z' || it in 'A'..'Z' }.ifEmpty { "item" }
-    var number = 1L
-    var article: String
-    do {
-        val suffix = "C$number"
-        article = base.take((20 - suffix.length).coerceAtLeast(0)) + suffix
-        number++
-    } while (article in used)
+    val article = randomArticle(usedArticles() + source.values[idField.id].orEmpty())
     return source.copy(id = id, values = source.values + (idField.id to article))
 }
 
@@ -108,7 +109,9 @@ fun checkShape(project: Project) {
     require(project.products.map { it.id }.distinct().size == project.products.size) { "Повторяющийся ID товара" }
     project.products.forEach { p ->
         require(p.id.isNotBlank() && project.templates.any { it.id == p.templateId }) { "Товар ссылается на отсутствующую форму" }
-        p.pictures.forEach { require(it.file.isEmpty() || Regex("[a-f0-9]{32}\\.(jpg|png)").matches(it.file)) { "Некорректное имя изображения" } }
+    }
+    (project.products.flatMap { it.pictures } + project.templates.flatMap { it.defaultPictures }).forEach {
+        require(it.file.isEmpty() || Regex("[a-f0-9]{32}\\.(jpg|png)").matches(it.file)) { "Некорректное имя изображения" }
     }
 }
 
@@ -124,7 +127,7 @@ fun newSupplierCategory(categories: List<Category>, name: String): Category {
 /** Compatibility alias: there is only one built-in universal preset now. */
 fun minimalTemplate() = defaultTemplate()
 
-fun Project.withMinimalPreset(): Project = withImportRules().withUniversalForm().withDirectPortalCategories()
+fun Project.withMinimalPreset(): Project = withImportRules().withDeliveryDaysMapping().withUniversalForm().withDirectPortalCategories()
 
 fun Project.withDirectPortalCategories(): Project = copy(
     settings = settings.copy(usePortalCategories = true),
@@ -186,7 +189,11 @@ fun Template.cardFields(settings: Settings): List<Field> {
 }
 
 fun Field.catalogHint(): String? = when (target) {
-    "param" -> if (isVatIncludedParameter()) "Передаётся как характеристика товара. В предоставленной YML-схеме отдельного признака включения НДС в цену нет." else null
+    "param" -> when {
+        isDeliveryDaysParameter() -> "Это характеристика, а не срок доставки для экспорта. Укажите срок в поле YML deliveryDays. Характеристика сохранена отдельно, потому что её значение отличается или имеет другой формат."
+        isVatIncludedParameter() -> "Передаётся как характеристика товара. В предоставленной YML-схеме отдельного признака включения НДС в цену нет."
+        else -> null
+    }
     "categoryId" -> "Ваша категория из настроек каталога. На портале её нужно сопоставить с категорией справочника."
     "regions" -> "Названия из справочника портала, по одному на строку или через ;. Например: Москва; Московская область."
     "region" -> "Прежнее поле ID региона. Выгружается внутри regions. Для нескольких регионов используйте «Регионы поставки»."

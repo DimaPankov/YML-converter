@@ -64,10 +64,15 @@ fun dictionaryForTarget(target: String) = when(target) {
     "vat" -> "vat"; "packageType" -> "package"; "currencyId" -> "currency"; else -> ""
 }
 fun Field.dictionaryKey() = if (dictionary == "custom") "" else dictionary.ifBlank { dictionaryForTarget(target) }
+fun Field.customListOptions(): List<FieldOption> = options.flatMap { option ->
+    listOf(FieldOption(option.value)) +
+        if (option.label.isNotBlank() && option.label != option.value) listOf(FieldOption(option.label)) else emptyList()
+}
 fun Field.choices(): List<FieldChoice> {
     val key = dictionaryKey()
     if (key.isNotEmpty()) return Dictionaries.choices(key)
-    if (options.isNotEmpty()) return options.map { FieldChoice(it.value, if (it.label.isBlank() || it.value == it.label) it.value else "${it.value} — ${it.label}") }
+    if (options.isNotEmpty()) return customListOptions().map { it.value.trim() }.filter { it.isNotEmpty() }
+        .distinct().map { FieldChoice(it, it) }
     return if (type == "boolean") listOf(FieldChoice("true", "Да"), FieldChoice("false", "Нет")) else emptyList()
 }
 fun Field.effectiveInputMode() = if (inputMode != "auto") inputMode else if (type == "boolean") "select"

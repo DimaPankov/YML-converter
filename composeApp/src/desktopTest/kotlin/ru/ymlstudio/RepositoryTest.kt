@@ -10,6 +10,23 @@ import kotlin.io.path.*
 import kotlin.test.*
 
 class RepositoryTest {
+    @Test fun legacyDeliveryValueRecoversOnLoadAndRemainsInExportAfterSave() {
+        val directory = Files.createTempDirectory("delivery-recovery")
+        val before = validProject().let { project -> project.copy(
+            templates = project.templates.map { t -> t.copy(fields = t.fields + Field("days-param", "param", "Срок доставки, рабочие дни")) },
+            products = project.products.map { p -> p.copy(values = p.values + mapOf("deliveryDays" to "", "days-param" to "60")) }) }
+        ProjectRepository(directory).use { repo ->
+            repo.save(before)
+            val restored = repo.load()
+            assertEquals("60", restored.products.single().values["deliveryDays"])
+            repo.save(restored)
+            val destination = directory.resolve("export.yml")
+            repo.export(repo.load(), destination, false)
+            val doc = parse(destination.readText())
+            assertEquals("60", (doc.getElementsByTagNameNS(YML_NAMESPACE, "option").item(0) as org.w3c.dom.Element).getAttribute("days"))
+        }
+    }
+
     @Test fun bundledDictionariesExactlyMatchAllProvidedXmlRows() {
         val files = mapOf("country" to "oksmList.xml", "okei" to "okeiList.xml", "unit" to "unitList.xml",
             "category" to "categoryList.xml", "region" to "regionList.xml", "vat" to "ndsList.xml",
