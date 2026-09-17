@@ -8,6 +8,21 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ProductCopyTest {
+    @Test fun steIsNotInheritedButCanBeEnteredExplicitlyForCopy() {
+        val form = Template("t", "Форма", fields = listOf(
+            Field("sku", "id", "Артикул"), Field("title", "name", "Название"),
+            Field("portalId", "ste", "ID СТЕ", default = "38910216")))
+        val source = Product("source", "t", mapOf("sku" to "A1", "title" to "Товар", "portalId" to "38910216"))
+        val project = defaultProject().copy(templates = listOf(form), products = listOf(source))
+        assertEquals("", project.createProduct("new", form).values["portalId"])
+        val copy = project.duplicateProduct(source, "copy")
+        assertEquals("", copy.values["portalId"])
+        assertEquals("38910216", source.values["portalId"])
+        assertEquals("38910217", project.finishProductCopy(copy, mapOf("portalId" to "38910217")).values["portalId"])
+        val oldForm = form.copy(fields = form.fields.filter { it.target != "ste" })
+        val oldProject = project.copy(templates = listOf(oldForm), products = listOf(source.copy(values = source.values - "portalId")))
+        assertEquals("", oldProject.updateTemplate(form).products.single().values["portalId"])
+    }
     @Test fun quickCopyChangesSelectedFieldsAndRejectsDuplicateArticle() {
         val template = Template("t", "Форма", fields = listOf(
             Field("sku", "id", "Артикул", quickAccess = true),

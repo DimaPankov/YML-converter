@@ -15,7 +15,8 @@ class DeliveryDaysMappingTest {
 
     @Test fun restoresFilledParameterForElevenProductsAndExportsDaysForAllFifteen() {
         val before = brokenProject()
-        assertEquals(11, validate(before).errors.count { "заполните «Срок доставки, рабочие дни»" in it })
+        assertTrue(validate(before).errors.isEmpty())
+        assertEquals(15, Regex("days=\"60\"").findAll(buildYml(before)).count())
         val after = before.withDeliveryDaysMapping()
         assertTrue(validate(after).errors.isEmpty(), validate(after).errors.toString())
         assertTrue(after.products.all { it.values["deliveryDays"] == "60" })

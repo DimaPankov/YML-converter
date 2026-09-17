@@ -10,11 +10,30 @@ fun Project.selectedProducts(ids: Set<String>): List<Product> {
 
 fun Template.bulkFields(settings: Settings): List<Field> = cardFields(settings).filter { it.target != "id" }
 
-fun Project.updateProducts(ids: Set<String>, changes: Map<String, String>, regenerateArticles: Boolean = false): Project {
+enum class BulkPhotoMode(val label: String) {
+    KEEP("Не менять"), ADD("Добавить"), REPLACE("Заменить все"), CLEAR("Удалить все")
+}
+
+data class BulkPhotoChange(val mode: BulkPhotoMode = BulkPhotoMode.KEEP, val pictures: List<Picture> = emptyList()) {
+    fun applyTo(current: List<Picture>): List<Picture> = when (mode) {
+        BulkPhotoMode.KEEP -> current
+        BulkPhotoMode.ADD -> current + pictures
+        BulkPhotoMode.REPLACE -> pictures
+        BulkPhotoMode.CLEAR -> emptyList()
+    }
+}
+
+fun Project.updateProducts(ids: Set<String>, changes: Map<String, String>, regenerateArticles: Boolean = false,
+    photos: BulkPhotoChange = BulkPhotoChange()): Project {
     val selected = selectedProducts(ids)
     val template = templates.first { it.id == selected.first().templateId }
     val allowed = template.bulkFields(settings).map { it.id }.toSet()
-    require(changes.isNotEmpty() || regenerateArticles) { "Выберите поля для изменения" }
+    require(changes.isNotEmpty() || regenerateArticles || photos.mode != BulkPhotoMode.KEEP) { "Выберите поля для изменения" }
+    if (photos.mode in listOf(BulkPhotoMode.ADD, BulkPhotoMode.REPLACE)) {
+        require(photos.pictures.isNotEmpty()) { "Добавьте фотографии" }
+        require(photos.pictures.all { it.file.isNotBlank() || it.url.isNotBlank() }) { "Укажите файл или ссылку фотографии" }
+    }
+    require(selected.all { photos.applyTo(it.pictures).size <= 10 }) { "У товара может быть не больше 10 фотографий" }
     require(changes.keys.all { it in allowed }) { "Выбрано недоступное для массового изменения поле" }
     val articleFields = template.fields.filter { it.target == "id" }
     require(!regenerateArticles || articleFields.isNotEmpty()) { "В форме нет поля артикула" }
@@ -23,7 +42,7 @@ fun Project.updateProducts(ids: Set<String>, changes: Map<String, String>, regen
         if (product.id !in ids) product else {
             val article = generator?.next()
             val articles = if (article == null) emptyMap() else articleFields.associate { it.id to article }
-            product.copy(values = product.values + changes + articles)
+            product.copy(values = product.values + changes + articles, pictures = photos.applyTo(product.pictures))
         }
     })
 }

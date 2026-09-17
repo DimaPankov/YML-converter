@@ -4,6 +4,7 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -171,13 +172,7 @@ internal fun Studio(repo: ProjectRepository, initial: Project, closeRequest: Boo
                         val p = draft.products.first { it.id == productId }
                         val t = draft.templates.first { it.id == p.templateId }
                         ProductEditor(p, t, draft, busy, { updated -> draft = draft.copy(products = draft.products.map { if (it.id == p.id) updated else it }) },
-                            { commit() }, { navigate(page) }, {
-                                if (p.pictures.size >= 10) message = "Можно добавить максимум 10 фото"
-                                else chooseFile("Выберите JPEG или PNG")?.let { file -> work {
-                                    val pic = withContext(Dispatchers.IO) { repo.addImage(file) }
-                                    draft = draft.copy(products = draft.products.map { if (it.id == p.id) it.copy(pictures = it.pictures + pic) else it })
-                                } }
-                            }, { title, action -> confirm = title to action }, { field, name ->
+                            { commit() }, { navigate(page) }, { field, name ->
                                 val category = newSupplierCategory(draft.categories, name)
                                 draft = draft.copy(categories = draft.categories + category, products = draft.products.map {
                                     if (it.id == p.id) it.copy(values = it.values + (field.id to category.id)) else it
@@ -189,7 +184,7 @@ internal fun Studio(repo: ProjectRepository, initial: Project, closeRequest: Boo
                         TemplateEditor(t, busy, { updated -> draft = draft.copy(templates = draft.templates.map { if (it.id == t.id) updated else it }) },
                             { commit(saved.updateTemplate(t)) }, { navigate(page) }, { title, action -> confirm = title to action })
                     }
-                    page == 0 -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    page == 0 -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Heading("Товары") {
                             if (selectedIds.isNotEmpty()) {
                                 OutlinedButton(onClick = { commit(saved.deleteProducts(selectedIds), showSuccess = false) }, enabled = !busy,
@@ -212,7 +207,12 @@ internal fun Studio(repo: ProjectRepository, initial: Project, closeRequest: Boo
                             TextButton({ selectedIds = emptySet() }, enabled = !busy) { Text("Снять выбор") }
                         }
                         if (products.isEmpty()) Empty("Товары не найдены")
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        val productListState = rememberLazyListState()
+                        LaunchedEffect(products.map { it.id }) {
+                            if (products.isNotEmpty()) productListState.scrollToItem(products.lastIndex)
+                        }
+                        LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("products-list"),
+                            state = productListState, contentPadding = PaddingValues(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             items(products, key = { it.id }) { p ->
                                 val t = saved.templates.first { it.id == p.templateId }; val v = p.valuesFor(t)
                                 ProductContextMenu(p.id, p.id in selectedIds, selectedTemplateId == null || selectedTemplateId == p.templateId, busy,
@@ -278,9 +278,9 @@ internal fun Studio(repo: ProjectRepository, initial: Project, closeRequest: Boo
             }
         }
     }
-    if (bulkEdit && selectedIds.isNotEmpty()) BulkEditDialog(saved, selectedIds, busy, { bulkEdit = false }) { changes, regenerateArticles ->
+    if (bulkEdit && selectedIds.isNotEmpty()) BulkEditDialog(saved, selectedIds, busy, { bulkEdit = false }) { changes, regenerateArticles, photos ->
         work {
-            val next = saved.updateProducts(selectedIds, changes, regenerateArticles)
+            val next = saved.updateProducts(selectedIds, changes, regenerateArticles, photos)
             withContext(Dispatchers.IO) { repo.save(next) }
             saved = next; draft = next; selectedIds = emptySet(); bulkEdit = false
         }
@@ -288,12 +288,24 @@ internal fun Studio(repo: ProjectRepository, initial: Project, closeRequest: Boo
     copySource?.let { source ->
         val template = saved.templates.first { it.id == source.templateId }
         val copy = copyDraft!!
+        val quickMode = template.copyPattern.isNotBlank()
+        var quickText by remember(copy.id) { mutableStateOf(if (quickMode) template.copyText(copy) else "") }
+        val quickResult = remember(quickText, copy, template) {
+            runCatching { copy.copy(values = copy.values + if (quickMode) template.copyValues(quickText) else emptyMap()) }
+        }
+        val preview = quickResult.getOrNull() ?: copy
         val nameField = template.fields.firstOrNull { it.target == "name" }
         AlertDialog(onDismissRequest = { if (!busy) copySource = null },
             title = { Text("Копировать товар") },
             text = {
-                Column(Modifier.width(480.dp).heightIn(max = 440.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    template.copyFields(saved.settings).forEach { field ->
+                Column(Modifier.width(480.dp).heightIn(max = 440.dp).verticalScroll(rememberScrollState()).testTag("copy-fields"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (quickMode) {
+                        Input(quickText, { if (!busy) quickText = it }, "Быстрое заполнение", multiline = true)
+                        quickResult.exceptionOrNull()?.message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        if (quickResult.isSuccess) template.fields.filter { it.copyVariable.isNotBlank() }.forEach { field ->
+                            Text("${field.label}: ${preview.values[field.id].orEmpty()}", Modifier.testTag("copy-preview-${field.id}"))
+                        }
+                    } else template.copyFields(saved.settings).forEach { field ->
                         key(field.id) {
                             FieldValueInput(field, copy.values[field.id].orEmpty(), if (field.target == "name") "Новое название товара" else field.label) { value ->
                                 if (!busy) copyDraft = copy.copy(values = copy.values + (field.id to value))
@@ -302,9 +314,9 @@ internal fun Studio(repo: ProjectRepository, initial: Project, closeRequest: Boo
                     }
                 }
             },
-            confirmButton = { Button(enabled = !busy && !copy.values[nameField?.id].isNullOrBlank(), onClick = {
+            confirmButton = { Button(enabled = !busy && quickResult.isSuccess && !preview.values[nameField?.id].isNullOrBlank(), onClick = {
                 work {
-                    val result = saved.finishProductCopy(copy, copy.values)
+                    val result = if (quickMode) saved.finishQuickProductCopy(copy, quickText) else saved.finishProductCopy(copy, copy.values)
                     val next = saved.copy(products = saved.products + result)
                     withContext(Dispatchers.IO) { repo.save(next) }
                     saved = next
@@ -384,7 +396,7 @@ internal fun Studio(repo: ProjectRepository, initial: Project, closeRequest: Boo
 @Composable private fun Toggle(value: Boolean, label: String, onChange: (Boolean) -> Unit) { Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(value, onChange); Text(label) } }
 private fun <T> List<T>.move(index: Int, delta: Int): List<T> = toMutableList().apply { if (index + delta in indices) add(index + delta, removeAt(index)) }
 
-@Composable private fun ProductEditor(p: Product, t: Template, project: Project, busy: Boolean, update: (Product) -> Unit, save: () -> Unit, cancel: () -> Unit, upload: () -> Unit, confirm: (String, () -> Unit) -> Unit, createCategory: (Field, String) -> Unit) {
+@Composable private fun ProductEditor(p: Product, t: Template, project: Project, busy: Boolean, update: (Product) -> Unit, save: () -> Unit, cancel: () -> Unit, createCategory: (Field, String) -> Unit) {
     var categoryField by remember(p.id) { mutableStateOf<Field?>(null) }
     var categoryName by remember(p.id) { mutableStateOf("") }
     categoryField?.let { field ->
@@ -404,24 +416,29 @@ private fun <T> List<T>.move(index: Int, delta: Int): List<T> = toMutableList().
             item { Panel {
                 Text("Фотографии (${p.pictures.size}/10)", style = MaterialTheme.typography.titleLarge)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedButton(upload, enabled = !busy && p.pictures.size < 10) { Text("Загрузить файл") }
                     OutlinedButton({ update(p.copy(pictures = p.pictures + Picture())) }, enabled = !busy && p.pictures.size < 10) { Text("Добавить ссылку") }
                 }
             } }
             items(p.pictures.size) { index ->
                 val pic = p.pictures[index]
                 Panel {
-                    Text(if (index == 0) "Основное фото" else "Фото ${index + 1}", fontWeight = FontWeight.Medium)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (index == 0) "Основное фото" else "Фото ${index + 1}", Modifier.weight(1f), fontWeight = FontWeight.Medium)
+                        TextButton({ update(p.copy(pictures = p.pictures.filterIndexed { i, _ -> i != index })) },
+                            enabled = !busy, modifier = Modifier.testTag("delete-photo-$index")) {
+                            Text("Удалить фото", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
                     if (pic.file.isNotEmpty()) {
                         LocalPhoto(picture = pic)
                         Text("${pic.name.ifBlank { pic.file }} · ${pic.width} × ${pic.height} px", color = Muted)
+                        PhotoLocation(pic)
                     }
                     Input(pic.url, { url -> update(p.copy(pictures = p.pictures.mapIndexed { i, item -> if (i == index) item.copy(url = url) else item })) }, "Публичная ссылка HTTP/HTTPS")
                     if (pic.file.isNotEmpty() && pic.url.isBlank()) Text("Адрес для экспорта: ${imageUrl(pic, project.settings).ifEmpty { "не задан" }}", color = Muted)
                     Row {
                         TextButton({ update(p.copy(pictures = p.pictures.move(index, -1))) }, enabled = index > 0) { Text("↑ Выше") }
                         TextButton({ update(p.copy(pictures = p.pictures.move(index, 1))) }, enabled = index < p.pictures.lastIndex) { Text("↓ Ниже") }
-                        TextButton({ confirm("Убрать фотографию из карточки?") { update(p.copy(pictures = p.pictures.filterIndexed { i, _ -> i != index })) } }) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
                     }
                 }
             }
@@ -445,7 +462,15 @@ private fun <T> List<T>.move(index: Int, delta: Int): List<T> = toMutableList().
     }
     bitmap?.let { Image(it, picture.name.ifBlank { "Фотография товара" }, Modifier.heightIn(max = 180.dp).widthIn(max = 360.dp)) }
 }
-private val LocalImageDirectory = staticCompositionLocalOf { defaultDataDirectory() }
+internal val LocalImageDirectory = staticCompositionLocalOf { defaultDataDirectory() }
+
+@Composable internal fun PhotoLocation(picture: Picture) {
+    val location = if (picture.file.isNotBlank()) LocalImageDirectory.current.resolve("images").resolve(picture.file).toAbsolutePath().normalize().toString()
+        else picture.url
+    if (location.isNotBlank()) androidx.compose.foundation.text.selection.SelectionContainer {
+        Text(location, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
 
 @Composable internal fun YmlImportDialog(preview: YmlImport, asTemplate: Boolean, busy: Boolean,
     dismiss: () -> Unit, apply: (Int, String) -> Unit) {
@@ -471,10 +496,25 @@ private val LocalImageDirectory = staticCompositionLocalOf { defaultDataDirector
 }
 
 @Composable private fun TemplateEditor(t: Template, busy: Boolean, update: (Template) -> Unit, save: () -> Unit, cancel: () -> Unit, confirm: (String, () -> Unit) -> Unit) {
+    val patternError = remember(t) { t.copyPatternError() }
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Heading("Редактор формы") { OutlinedButton(cancel, enabled = !busy) { Text("Отмена") }; Button(save, enabled = !busy) { Text("Сохранить") } }
+        Heading("Редактор формы") { OutlinedButton(cancel, enabled = !busy) { Text("Отмена") }; Button(save, enabled = !busy && patternError == null) { Text("Сохранить") } }
+        if (patternError != null) Text(patternError, color = MaterialTheme.colorScheme.error)
         LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             item { Input(t.name, { update(t.copy(name = it)) }, "Название формы") }
+            item { Panel {
+                Text("Заполнение одной строкой", style = MaterialTheme.typography.titleMedium)
+                OutlinedTextField(
+                    value = t.copyPattern,
+                    onValueChange = { update(t.copy(copyPattern = it)) },
+                    label = { Text("Шаблон для копирования товара") },
+                    placeholder = { Text("p1{Футболка RLS, p2, p3/p4}") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3,
+                    enabled = !busy
+                )
+                Text("Свяжите p1, p2… с полями ниже.", color = Muted, style = MaterialTheme.typography.bodySmall)
+            } }
             item { Input(t.description, { update(t.copy(description = it)) }, "Описание формы", multiline = true) }
             if (t.defaultPictures.isNotEmpty()) item { Panel {
                 Text("Фотографии новых товаров: ${t.defaultPictures.size}", fontWeight = FontWeight.Medium)
@@ -495,7 +535,7 @@ private val LocalImageDirectory = staticCompositionLocalOf { defaultDataDirector
                         Input(f.label, { change(f.copy(label = it)) }, "Название поля", Modifier.weight(1f))
                         Choice(f.target, listOf("param" to "Характеристика (param)") + fieldDefinitions.filter { it.target != "categoryId" }.map { it.target to it.label }, "Поле YML", Modifier.weight(1f)) { target ->
                             val def = fieldDefinitions.firstOrNull { it.target == target }
-                            change(f.copy(target = target, type = def?.type ?: f.type, required = def?.required ?: f.required, dictionary = "", inputMode = "auto"))
+                            change(f.copy(target = target, type = def?.type ?: f.type, required = def?.required ?: f.required, dictionary = "", inputMode = "auto", copyVariable = if (target in listOf("id", "ste")) "" else f.copyVariable))
                         }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -505,6 +545,9 @@ private val LocalImageDirectory = staticCompositionLocalOf { defaultDataDirector
                     FieldChoiceConfiguration(f, ::change)
                     Toggle(f.required, "Требовать заполнение в этой форме") { change(f.copy(required = it)) }
                     if (f.target != "name") Toggle(f.quickAccess, "Быстрый доступ: в списке и при копировании товара") { change(f.copy(quickAccess = it)) }
+                    if (f.target !in listOf("id", "ste")) {
+                        Input(f.copyVariable, { change(f.copy(copyVariable = it.trim())) }, "Переменная быстрого заполнения (p1, p2…)")
+                    }
                 }
             }
             item { AddFieldButtons(t.fields, ::newId) { update(t.copy(fields = t.fields + it)) } }

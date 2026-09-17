@@ -3,6 +3,25 @@ package ru.ymlstudio
 import kotlin.test.*
 
 class BulkProductsTest {
+    @Test fun bulkPhotosAppendReplaceClearAndRespectLimit() {
+        val ids = setOf("1", "2")
+        val picture = Picture(url = "https://example.com/new.jpg")
+        val added = project.updateProducts(ids, emptyMap(), photos = BulkPhotoChange(BulkPhotoMode.ADD, listOf(picture)))
+        assertEquals(project.products[0].pictures + picture, added.products[0].pictures)
+        assertEquals(listOf(picture), added.products[1].pictures)
+        assertEquals(project.products[2], added.products[2])
+        val replaced = project.updateProducts(ids, mapOf("price" to "10"), photos = BulkPhotoChange(BulkPhotoMode.REPLACE, listOf(picture)))
+        assertTrue(replaced.products.take(2).all { it.pictures == listOf(picture) && it.values["price"] == "10" })
+        val cleared = added.updateProducts(ids, emptyMap(), photos = BulkPhotoChange(BulkPhotoMode.CLEAR))
+        assertTrue(cleared.products.take(2).all { it.pictures.isEmpty() })
+        assertEquals(1, project.products[0].pictures.size)
+        assertFailsWith<IllegalArgumentException> {
+            project.updateProducts(ids, emptyMap(), photos = BulkPhotoChange(BulkPhotoMode.ADD, List(10) { picture }))
+        }
+        assertFailsWith<IllegalArgumentException> {
+            project.updateProducts(ids, emptyMap(), photos = BulkPhotoChange(BulkPhotoMode.REPLACE, listOf(Picture())))
+        }
+    }
     private val form = Template("a", "Первая", fields = listOf(
         Field("sku", "id", "Артикул"), Field("name", "name", "Название"),
         Field("price", "price", "Цена"), Field("color", "param", "Цвет")))

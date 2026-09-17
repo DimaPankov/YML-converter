@@ -16,6 +16,40 @@ import java.nio.file.Path
 import kotlin.test.assertEquals
 
 class StudioUiTest {
+    @Test fun oneCopyInputUpdatesSeveralFieldsAndRejectsUnfinishedSyntax() {
+        ProjectRepository(Files.createTempDirectory("yml-pattern-copy-ui")).use { repo ->
+            val template = defaultTemplate().let { t -> t.copy(fields = t.fields.map {
+                if (it.target == "name") it.copy(copyVariable = "p1") else it
+            } + Field("color", "param", "Цвет", copyVariable = "p2") + Field("size", "param", "Размер", copyVariable = "p3"),
+                copyPattern = "p1{Футболка p2, p3}") }
+            val source = newProduct("source", template).copy(values = mapOf("id" to "12", "name" to "Футболка", "color" to "синий", "size" to "54/194"))
+            val initial = defaultProject().copy(templates = listOf(template), products = listOf(source))
+            repo.save(initial)
+            compose.setContent { MaterialTheme { Box(Modifier.size(1280.dp, 860.dp)) { Studio(repo, initial, false, {}, {}) } } }
+            compose.productAction("source", "Копировать")
+            compose.onAllNodes(hasSetTextAction() and hasAnyAncestor(hasTestTag("copy-fields"))).assertCountEquals(1)
+            compose.onNodeWithText("Быстрое заполнение").performTextReplacement("p1{Футболка p2, p3}")
+            compose.onNodeWithText("Укажите значение в скобках: p2{…}").assertExists()
+            compose.onNodeWithText("Сохранить").assertIsNotEnabled()
+            compose.onNodeWithText("Быстрое заполнение").performTextReplacement("p1{Футболка p2{красный}")
+            compose.onNodeWithText("Сохранить").assertIsNotEnabled()
+            compose.onNodeWithText("Быстрое заполнение").performTextReplacement("p1{Футболка p2{красный}, p3{50/182}}")
+            compose.onNodeWithTag("copy-preview-name").assertTextContains("Название товара: Футболка красный, 50/182")
+            compose.onNodeWithText("Отмена").performClick()
+            assertEquals(listOf(source), repo.load().products)
+            compose.productAction("source", "Копировать")
+            compose.onNodeWithText("Быстрое заполнение").assertTextContains("p1{Футболка p2{синий}, p3{54/194}}")
+            compose.onNodeWithText("Быстрое заполнение").performTextReplacement("p1{Футболка p2{красный}, p3{50/182}}")
+            compose.onNodeWithText("Сохранить").performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("Копировать товар").fetchSemanticsNodes().isEmpty() }
+            val restored = repo.load()
+            assertEquals(source, restored.products.first())
+            assertEquals("Футболка красный, 50/182", restored.products.last().values["name"])
+            assertEquals("красный", restored.products.last().values["color"])
+            assertEquals("50/182", restored.products.last().values["size"])
+        }
+    }
+
     @Test fun quickAccessFieldsCanBeEditedInCopyDialogAndCancelDiscardsThem() {
         ProjectRepository(Files.createTempDirectory("yml-quick-copy-ui")).use { repo ->
             val template = defaultTemplate().copy(fields = defaultTemplate().fields.map {

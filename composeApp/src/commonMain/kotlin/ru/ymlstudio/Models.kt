@@ -5,8 +5,8 @@ import kotlinx.serialization.json.Json
 
 @Serializable data class Settings(val name: String = "", val company: String = "", val url: String = "", val imageBase: String = "", val useVat: Boolean = false, val usePortalCategories: Boolean = true, val darkTheme: Boolean = false)
 @Serializable data class Category(val id: String = "", val name: String = "", val parentId: String = "")
-@Serializable data class Field(val id: String, val target: String, val label: String, val type: String = "text", val required: Boolean = false, val unit: String = "", val default: String = "", val inputMode: String = "auto", val dictionary: String = "", val options: List<FieldOption> = emptyList(), val quickAccess: Boolean = false)
-@Serializable data class Template(val id: String, val name: String, val description: String = "", val fields: List<Field>, val defaultPictures: List<Picture> = emptyList())
+@Serializable data class Field(val id: String, val target: String, val label: String, val type: String = "text", val required: Boolean = false, val unit: String = "", val default: String = "", val inputMode: String = "auto", val dictionary: String = "", val options: List<FieldOption> = emptyList(), val quickAccess: Boolean = false, val copyVariable: String = "")
+@Serializable data class Template(val id: String, val name: String, val description: String = "", val fields: List<Field>, val defaultPictures: List<Picture> = emptyList(), val copyPattern: String = "")
 @Serializable data class Picture(val url: String = "", val file: String = "", val width: Int = 0, val height: Int = 0, val name: String = "")
 @Serializable data class Product(val id: String, val templateId: String, val values: Map<String, String> = emptyMap(), val pictures: List<Picture> = emptyList())
 @Serializable data class Project(val version: Int = 1, val settings: Settings, val categories: List<Category>, val templates: List<Template>, val products: List<Product>, val minimalPresetInstalled: Boolean = false, val importRulesVersion: Int = 0, val universalFormUnified: Boolean = false)
@@ -52,14 +52,15 @@ fun defaultTemplate() = Template("basic", "Универсальная форма
 fun defaultProject() = Project(settings = Settings(), categories = emptyList(), templates = listOf(defaultTemplate()), products = emptyList(),
     minimalPresetInstalled = true, importRulesVersion = 1, universalFormUnified = true)
 fun Product.valuesFor(template: Template, settings: Settings? = null) = (if (settings == null) template.fields else template.cardFields(settings)).filter { it.target != "param" }.associate { it.target to values[it.id].orEmpty().trim() }
-fun newProduct(id: String, template: Template) = Product(id, template.id, template.fields.associate { it.id to it.default }, template.defaultPictures)
+fun newProduct(id: String, template: Template) = Product(id, template.id,
+    template.fields.associate { it.id to if (it.target == "ste") "" else it.default }, template.defaultPictures)
 
 /** Name remains available for older projects; other fields are selected in the form editor. */
-fun Template.copyFields(settings: Settings): List<Field> = cardFields(settings).filter { it.target == "name" || it.quickAccess }
+fun Template.copyFields(settings: Settings): List<Field> = cardFields(settings).filter { it.target in listOf("name", "ste") || it.quickAccess || it.copyVariable.isNotBlank() }
 
 fun Project.finishProductCopy(copy: Product, edits: Map<String, String>): Product {
     val template = templates.first { it.id == copy.templateId }
-    val allowed = template.copyFields(settings).map { it.id }.toSet()
+    val allowed = (template.copyFields(settings) + template.fields.filter { it.copyVariable.isNotBlank() }).map { it.id }.toSet()
     val result = copy.copy(values = copy.values + edits.filterKeys { it in allowed }.mapValues { it.value.trim() })
     val values = result.valuesFor(template)
     require(!values["name"].isNullOrBlank()) { "Укажите название товара" }
@@ -81,10 +82,12 @@ fun Project.createProduct(id: String, template: Template): Product {
 fun Project.duplicateProduct(source: Product, id: String): Product {
     require(id.isNotBlank() && products.none { it.id == id }) { "ID копии должен быть уникальным" }
     val template = templates.first { it.id == source.templateId }
+    require(template.copyPatternError() == null) { template.copyPatternError().orEmpty() }
     val idField = template.fields.firstOrNull { it.target == "id" }
         ?: error("В форме товара отсутствует поле артикула")
     val article = randomArticle(usedArticles() + source.values[idField.id].orEmpty())
-    return source.copy(id = id, values = source.values + (idField.id to article))
+    val clearedSte = template.fields.filter { it.target == "ste" }.associate { it.id to "" }
+    return source.copy(id = id, values = source.values + (idField.id to article) + clearedSte)
 }
 
 fun imageUrl(picture: Picture, settings: Settings): String = picture.url.trim().ifEmpty {

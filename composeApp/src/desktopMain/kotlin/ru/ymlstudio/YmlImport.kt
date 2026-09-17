@@ -21,7 +21,7 @@ data class YmlImport(val template: Template, val products: List<Product>, val wa
         val product = products[index]
         return template.copy(name = name.trim(), fields = template.fields.filter {
             it.required || it.id in product.values
-        }.map { it.copy(default = product.values[it.id].orEmpty()) }, defaultPictures = product.pictures)
+        }.map { it.copy(default = if (it.target == "ste") "" else product.values[it.id].orEmpty()) }, defaultPictures = product.pictures)
     }
 
     fun addProductsTo(project: Project): YmlImportResult {

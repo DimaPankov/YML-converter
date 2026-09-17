@@ -4,6 +4,15 @@ import java.nio.file.Files
 import kotlin.test.*
 
 class YmlImportTest {
+    @Test fun importingProductsKeepsSteButFormDoesNotInheritIt() {
+        val preview = parse("""<offers><offer id="A1"><name>Товар</name><ste>38910216</ste></offer></offers>""")
+        val form = preview.asTemplate(0, "Форма")
+        assertEquals("", form.fields.first { it.target == "ste" }.default)
+        assertEquals("", newProduct("new", form).values["ste"])
+        val imported = preview.addProductsTo(defaultProject()).project
+        val product = imported.products.single()
+        assertEquals("38910216", product.valuesFor(imported.templates.first { it.id == product.templateId })["ste"])
+    }
     @Test fun namedDeliveryParameterBecomesDeliveryOptionOnImportAndTemplateCreation() {
         val preview = parse("""<offers><offer id="1"><name>Товар</name>
             <delivery-options><option cost="0" days=""/></delivery-options>

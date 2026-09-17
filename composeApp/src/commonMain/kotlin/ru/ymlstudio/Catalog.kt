@@ -9,6 +9,9 @@ expect fun currentCatalogDate(): String
 
 data class ValidationReport(val errors: List<String>, val warnings: List<String>)
 fun validate(project: Project): ValidationReport {
+    return validatePrepared(project.withDeliveryDaysMapping())
+}
+private fun validatePrepared(project: Project): ValidationReport {
     checkShape(project)
     val errors = mutableListOf<String>()
     val warnings = mutableListOf<String>()
@@ -27,26 +30,35 @@ fun validate(project: Project): ValidationReport {
             warnings += "Товар ${index + 1}: одноимённая характеристика срока доставки не заменяет поле deliveryDays. Проверьте оба значения."
         }
         fun value(key: String) = v[key].orEmpty()
-        val prefix = "Товар ${index + 1} (${value("name").ifEmpty { "без названия" }}): "
+        val prefix = "Товар ${index + 1} (${value("name").ifEmpty { "без названия" }}${value("id").takeIf { it.isNotEmpty() }?.let { "; артикул $it" }.orEmpty()}): "
         fun error(message: String) { errors += prefix + message }
+        val missing = mutableSetOf<String>()
+        fun missingField(key: String, label: String) {
+            if (missing.add(key)) error("заполните «$label».")
+        }
         fieldDefinitions.forEach { f ->
             if (f.target == "regions" && value("region").isNotEmpty()) return@forEach
-            if ((f.required || (f.target == "vat" && s.useVat)) && value(f.target).isEmpty()) error("заполните «${f.label}».")
+            if ((f.required || (f.target == "vat" && s.useVat)) && value(f.target).isEmpty()) {
+                val label = t.cardFields(s).firstOrNull { it.target == f.target }?.label ?: f.label
+                missingField(f.target, label)
+            }
         }
         if (s.useVat && value("vat").isNotEmpty() && canonicalVat(value("vat")) == null)
             error("НДС: значение «${value("vat")}» не допускается типом ndsType в XSD портала. Выберите ставку из списка.")
         t.cardFields(s).forEach { f ->
             if (f.target == "vat" && !s.useVat) return@forEach
+            if (f.target == "region" && value("regions").isNotEmpty()) return@forEach
+            if (f.target == "regions" && value("regions").isEmpty() && value("region").isNotEmpty()) return@forEach
             val text = p.values[f.id].orEmpty().trim()
             if (f.effectiveInputMode() == "select" && text.isNotEmpty() && !f.acceptsChoice(text)) error("«${f.label}»: выберите значение из списка.")
             // A form can make an optional portal field mandatory as well.
-            if (f.required && text.isEmpty() && (f.target != "categoryId" || value("ppCategory").isEmpty())) error("заполните «${f.label}».")
+            if (f.required && text.isEmpty() && (f.target != "categoryId" || value("ppCategory").isEmpty()))
+                missingField(if (f.target == "param") "param:${f.id}" else f.target, f.label)
             if (f.target !in listOf("vat", "okei") && text.isNotEmpty() && f.type == "number" && decimalCompare(text, "0") == null) error("«${f.label}»: требуется число.")
         }
-        if (value("id").isBlank()) error("укажите артикул.")
         if (value("id").isNotBlank() && !isValidArticle(value("id")))
             error("Артикул: по инструкции портала нужны только латинские буквы и цифры, не более 20 символов. Дефисы и пробелы недопустимы.")
-        if (!seen.add(value("id"))) error("артикул повторяется.")
+        if (value("id").isNotEmpty() && !seen.add(value("id"))) error("артикул повторяется.")
         if (currencyValue(value("currencyId")) !in supportedCurrencies) error("Валюта не поддерживается XSD портала. Выберите RUB, RUR, USD, EUR, BYR, BYN, KZT или UAH.")
         if (value("ppCategory").isNotEmpty()) {
             val category = Dictionaries.category.firstOrNull { it.id == value("ppCategory") }
@@ -57,6 +69,7 @@ fun validate(project: Project): ValidationReport {
         if (value("isVisibleToStateCustomers") == "false" && value("isAvailableToIndividuals") == "false")
             warnings += prefix + "товар недоступен обеим группам покупателей: оба признака доступности установлены в false."
         listOf("ppCategory", "ste", "region", "packageType").forEach { key ->
+            if (key == "region" && value("regions").isNotEmpty()) return@forEach
             if (value(key).isNotEmpty() && !Regex("[1-9][0-9]*").matches(value(key))) error("$key: требуется положительный числовой ID из справочника.")
         }
         if (value("okei").isNotEmpty() && okeiValue(value("okei")) == null)
@@ -75,9 +88,9 @@ fun validate(project: Project): ValidationReport {
             if (value(key).isNotEmpty() && (decimalCompare(value(key), "0") ?: -1) <= 0) error("$key: требуется число больше нуля.")
         }
         if ((decimalCompare(value("min-quantity"), value("max-quantity")) ?: 0) > 0) error("максимум поставки меньше минимума.")
-        listOf("beginDate", "endDate").forEach { if (!validDate(value(it))) error("$it: укажите корректные дату и время (ГГГГ-ММ-ДДTчч:мм).") }
+        listOf("beginDate", "endDate").forEach { if (value(it).isNotEmpty() && !validDate(value(it))) error("$it: укажите корректные дату и время (ГГГГ-ММ-ДДTчч:мм).") }
         fun dateValue(key: String) = value(key).let { if (it.length == 16) it + ":00" else it }
-        if (dateValue("endDate") <= dateValue("beginDate")) error("окончание предложения должно быть позже начала.")
+        if (validDate(value("beginDate")) && validDate(value("endDate")) && dateValue("endDate") <= dateValue("beginDate")) error("окончание предложения должно быть позже начала.")
         fieldDefinitions.filter { it.type == "boolean" }.forEach { if (value(it.target).isNotEmpty() && value(it.target) !in listOf("true", "false")) error("${it.target}: допустимы true / false.") }
         if (value("description").length > 3000) error("описание длиннее 3000 символов.")
         val dimensions = value("dimensions")
@@ -117,9 +130,12 @@ private fun invalidXml(text: String): Boolean {
 }
 private fun xml(text: String) = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&apos;")
 fun buildYml(project: Project, date: String = currentCatalogDate(), allowInvalid: Boolean = false): String {
+    return buildPreparedYml(project.withDeliveryDaysMapping(), date, allowInvalid)
+}
+private fun buildPreparedYml(project: Project, date: String, allowInvalid: Boolean): String {
     if (allowInvalid) checkShape(project)
     else {
-        val report = validate(project)
+        val report = validatePrepared(project)
         require(report.errors.isEmpty()) { report.errors.joinToString("\n") }
     }
     return buildString {

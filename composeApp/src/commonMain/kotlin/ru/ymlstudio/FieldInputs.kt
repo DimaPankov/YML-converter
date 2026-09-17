@@ -95,7 +95,7 @@ import androidx.compose.ui.unit.dp
             }
             OutlinedButton({ onChange(field.copy(options = options + FieldOption(""))) }) { Text("+ Добавить вариант") }
         }
-        FieldValueInput(field, field.default, "Значение для новых карточек") { onChange(field.copy(default = it)) }
+        if (field.target != "ste") FieldValueInput(field, field.default, "Значение для новых карточек") { onChange(field.copy(default = it)) }
     }
 }
 

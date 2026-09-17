@@ -29,6 +29,7 @@ fun Product.withTemplateFields(source: Template, destination: Template): Product
 
 /** Match against the OLD structure so additions/removals also reach equivalent forms. */
 fun Project.updateTemplate(updated: Template): Project {
+    require(updated.copyPatternError() == null) { updated.copyPatternError().orEmpty() }
     val original = templates.firstOrNull { it.id == updated.id }
         ?: return copy(templates = templates + updated)
     val structure = original.structure()
@@ -43,13 +44,13 @@ fun Project.updateTemplate(updated: Template): Project {
                 it.copy(values = product.values.filterKeys { key -> key !in sourceIds } + it.values)
             }
         }
-        val values = aligned.values + newFields.associate { it.id to it.default }
+        val values = aligned.values + newFields.associate { it.id to if (it.target == "ste") "" else it.default }
         product.copy(values = values)
     }
     return copy(templates = templates.map { template ->
         when {
             template.id == updated.id -> updated
-            template.id in equivalent -> template.copy(fields = updated.fields, defaultPictures = updated.defaultPictures)
+            template.id in equivalent -> template.copy(fields = updated.fields, defaultPictures = updated.defaultPictures, copyPattern = updated.copyPattern)
             else -> template
         }
     }, products = nextProducts)

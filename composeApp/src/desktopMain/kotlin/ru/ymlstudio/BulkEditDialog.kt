@@ -16,12 +16,21 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 
 @Composable internal fun BulkEditDialog(project: Project, ids: Set<String>, busy: Boolean,
-    dismiss: () -> Unit, apply: (Map<String, String>, Boolean) -> Unit) {
+    dismiss: () -> Unit,
+    apply: (Map<String, String>, Boolean, BulkPhotoChange) -> Unit) {
     val selected = remember(project, ids) { project.selectedProducts(ids) }
     val template = project.templates.first { it.id == selected.first().templateId }
     val fields = template.bulkFields(project.settings)
     var changes by remember(project, ids) { mutableStateOf(emptyMap<String, String>()) }
     var regenerateArticles by remember(project, ids) { mutableStateOf(false) }
+    var photos by remember(project, ids) { mutableStateOf(BulkPhotoChange()) }
+    val needsPictures = photos.mode in listOf(BulkPhotoMode.ADD, BulkPhotoMode.REPLACE)
+    val photoError = when {
+        needsPictures && photos.pictures.isEmpty() -> "Добавьте фотографии"
+        needsPictures && photos.pictures.any { it.file.isBlank() && it.url.isBlank() } -> "Укажите ссылку фотографии"
+        selected.any { photos.applyTo(it.pictures).size > 10 } -> "Максимум 10 фотографий у товара"
+        else -> null
+    }
     val initial = remember(project, ids) {
         fields.associate { field -> field.id to selected.map { it.values[field.id].orEmpty() }.distinct().singleOrNull() }
     }
@@ -47,7 +56,7 @@ import androidx.compose.ui.window.DialogProperties
                     }
 
                 }
-                LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("bulk-fields"), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     items(fields, key = { it.id }) { field ->
                         Column {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -64,10 +73,42 @@ import androidx.compose.ui.window.DialogProperties
                                 color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                         }
                     }
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Фотографии", style = MaterialTheme.typography.titleMedium)
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                BulkPhotoMode.entries.forEach { mode ->
+                                    FilterChip(selected = photos.mode == mode, onClick = { photos = photos.copy(mode = mode) },
+                                        enabled = !busy, modifier = Modifier.testTag("bulk-photos-${mode.name}"), label = { Text(mode.label) })
+                                }
+                            }
+                            if (photos.mode == BulkPhotoMode.KEEP) selected.flatMap { it.pictures }.distinct().forEach { PhotoLocation(it) }
+                            if (needsPictures) {
+                                photos.pictures.forEachIndexed { index, picture ->
+                                    Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        if (picture.file.isNotEmpty()) Text(picture.name.ifBlank { picture.file }, Modifier.weight(1f))
+                                        else OutlinedTextField(picture.url, { url ->
+                                            photos = photos.copy(pictures = photos.pictures.mapIndexed { i, old -> if (i == index) old.copy(url = url) else old })
+                                        }, enabled = !busy, label = { Text("Ссылка ${index + 1}") }, modifier = Modifier.weight(1f))
+                                        TextButton({ photos = photos.copy(pictures = photos.pictures.filterIndexed { i, _ -> i != index }) }, enabled = !busy) { Text("Удалить") }
+                                    }
+                                    if (picture.file.isNotBlank()) PhotoLocation(picture)
+                                    }
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedButton({ photos = photos.copy(pictures = photos.pictures + Picture()) },
+                                        enabled = !busy && photos.pictures.size < 10) { Text("Добавить ссылку") }
+                                }
+                            }
+                            photoError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        }
+                    }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(dismiss, enabled = !busy) { Text("Отмена") }
-                    Button({ apply(changes, regenerateArticles) }, enabled = !busy && (changes.isNotEmpty() || regenerateArticles), modifier = Modifier.testTag("bulk-apply")) {
+                    Button({ apply(changes, regenerateArticles, photos) },
+                        enabled = !busy && photoError == null && (changes.isNotEmpty() || regenerateArticles || photos.mode != BulkPhotoMode.KEEP), modifier = Modifier.testTag("bulk-apply")) {
                         Text(if (busy) "Сохранение…" else "Применить к ${selected.size} товарам")
                     }
                 }

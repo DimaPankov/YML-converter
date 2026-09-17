@@ -16,6 +16,65 @@ import java.nio.file.Path
 import kotlin.test.*
 
 class BulkAndThemeUiTest {
+    @Test fun listOpensAtLastProductAndKeepsItVisible() {
+        ProjectRepository(Files.createTempDirectory("yml-scroll-end")).use { repo ->
+            val initial = project().copy(products = List(30) { index ->
+                Product("item-$index", form.id, mapOf("id" to "SKU$index", "name" to "Товар $index"))
+            })
+            compose.setContent { Box(Modifier.size(1280.dp, 720.dp)) { Studio(repo, initial, false, {}, {}) } }
+            compose.onNodeWithTag("product-row-item-29").assertIsDisplayed()
+            val listBounds = compose.onNodeWithTag("products-list").fetchSemanticsNode().boundsInRoot
+            val rowBounds = compose.onNodeWithTag("product-row-item-29").fetchSemanticsNode().boundsInRoot
+            assertTrue(rowBounds.top >= listBounds.top && rowBounds.bottom <= listBounds.bottom)
+        }
+    }
+    @Test fun productPhotoDeletionIsSavedOnlyWithCard() {
+        ProjectRepository(Files.createTempDirectory("yml-delete-photo")).use { repo ->
+            val photo = Picture(url = "https://example.com/photo.jpg")
+            val initial = project().let { it.copy(products = it.products.map { p -> p.copy(pictures = listOf(photo)) }) }
+            repo.save(initial)
+            compose.setContent { Box(Modifier.size(1280.dp, 860.dp)) { Studio(repo, initial, false, {}, {}) } }
+            compose.onNodeWithTag("product-row-a").performClick()
+            compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasTestTag("delete-photo-0"))
+            compose.onNodeWithTag("delete-photo-0").performClick()
+            compose.onNodeWithTag("delete-photo-0").assertDoesNotExist()
+            assertEquals(initial, repo.load())
+            compose.onNodeWithText("Сохранить").performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("Изменения сохранены").fetchSemanticsNodes().isNotEmpty() }
+            assertTrue(repo.load().products.first().pictures.isEmpty())
+            assertEquals(listOf(photo), repo.load().products[1].pictures)
+        }
+    }
+    @Test fun bulkPhotosAcceptLinksAndApplyOnlyToSelection() {
+        val initial = project()
+        val directory = Path.of(System.getProperty("java.io.tmpdir"), "yml-photo-ui")
+        val picture = Picture(url = "https://example.com/new.png")
+        var result: Project? = null
+        compose.setContent {
+            CompositionLocalProvider(LocalImageDirectory provides directory) {
+                StudioTheme(false) {
+                    BulkEditDialog(initial, setOf("a", "b"), false, {}) { changes, articles, photos ->
+                        result = initial.updateProducts(setOf("a", "b"), changes, articles, photos)
+                    }
+                }
+            }
+        }
+        compose.onNodeWithTag("bulk-fields").performScrollToNode(hasTestTag("bulk-photos-ADD"))
+        compose.onNodeWithTag("bulk-photos-ADD").performClick()
+        compose.onNodeWithTag("bulk-apply").assertIsNotEnabled()
+        compose.onNodeWithText("Загрузить файл").assertDoesNotExist()
+        compose.onNodeWithText("Добавить ссылку").performScrollTo().performClick()
+        compose.onNodeWithText("Ссылка 1").performScrollTo().performTextInput(picture.url)
+        compose.onNodeWithText(picture.url).assertExists()
+        compose.onNodeWithTag("bulk-apply").performClick()
+        assertEquals(listOf(picture), result!!.products[0].pictures)
+        assertEquals(listOf(picture), result!!.products[1].pictures)
+        assertEquals(initial.products[2], result!!.products[2])
+        compose.onNodeWithText("Удалить", substring = false).performScrollTo().performClick()
+        compose.onNodeWithTag("bulk-apply").assertIsNotEnabled()
+        compose.onNodeWithTag("bulk-photos-CLEAR").performScrollTo().performClick()
+        compose.onNodeWithTag("bulk-apply").assertIsEnabled()
+    }
     @get:Rule val compose = createComposeRule()
     private val form = Template("form", "Одежда", fields = listOf(
         Field("id", "id", "Артикул"), Field("name", "name", "Название"),
