@@ -8,8 +8,9 @@ import kotlinx.serialization.json.Json
 @Serializable data class Field(val id: String, val target: String, val label: String, val type: String = "text", val required: Boolean = false, val unit: String = "", val default: String = "", val inputMode: String = "auto", val dictionary: String = "", val options: List<FieldOption> = emptyList(), val quickAccess: Boolean = false, val copyVariable: String = "")
 @Serializable data class Template(val id: String, val name: String, val description: String = "", val fields: List<Field>, val defaultPictures: List<Picture> = emptyList(), val copyPattern: String = "")
 @Serializable data class Picture(val url: String = "", val file: String = "", val width: Int = 0, val height: Int = 0, val name: String = "")
-@Serializable data class Product(val id: String, val templateId: String, val values: Map<String, String> = emptyMap(), val pictures: List<Picture> = emptyList())
-@Serializable data class Project(val version: Int = 1, val settings: Settings, val categories: List<Category>, val templates: List<Template>, val products: List<Product>, val minimalPresetInstalled: Boolean = false, val importRulesVersion: Int = 0, val universalFormUnified: Boolean = false)
+@Serializable data class ProductFolder(val id: String, val name: String)
+@Serializable data class Product(val id: String, val templateId: String, val values: Map<String, String> = emptyMap(), val pictures: List<Picture> = emptyList(), val folderId: String = "")
+@Serializable data class Project(val version: Int = 1, val settings: Settings, val categories: List<Category>, val templates: List<Template>, val products: List<Product>, val minimalPresetInstalled: Boolean = false, val importRulesVersion: Int = 0, val universalFormUnified: Boolean = false, val folders: List<ProductFolder> = emptyList())
 data class FieldDefinition(val target: String, val label: String, val type: String, val required: Boolean)
 val fieldDefinitions = listOf(
     FieldDefinition("id", "Артикул / ID предложения", "text", true),
@@ -94,6 +95,7 @@ fun imageUrl(picture: Picture, settings: Settings): String = picture.url.trim().
     if (picture.file.isNotEmpty() && settings.imageBase.isNotBlank()) settings.imageBase.trim().trimEnd('/') + "/" + picture.file else ""
 }
 fun checkShape(project: Project) {
+    project.checkFolders()
     require(project.version == 1) { "Неизвестный формат проекта" }
     require(project.templates.map { it.id }.distinct().size == project.templates.size) { "Повторяющийся ID формы" }
     project.templates.forEach { t ->

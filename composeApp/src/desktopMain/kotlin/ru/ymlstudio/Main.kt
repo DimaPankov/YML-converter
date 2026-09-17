@@ -89,6 +89,13 @@ internal fun Studio(repo: ProjectRepository, initial: Project, closeRequest: Boo
     var importAsTemplate by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf(emptySet<String>()) }
     var bulkEdit by remember { mutableStateOf(false) }
+    var folderId by remember { mutableStateOf("") }
+    var showFolders by remember { mutableStateOf(false) }
+    var folderEditor by remember { mutableStateOf<String?>(null) }
+    var movingIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var exportFolderId by remember { mutableStateOf<String?>("") }
+    var chooseExportFolder by remember { mutableStateOf(false) }
+    val activeFolderId = folderId.takeIf { id -> saved.folders.any { it.id == id } }.orEmpty()
     val selectedTemplateId = saved.products.firstOrNull { it.id in selectedIds }?.templateId
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
@@ -185,22 +192,45 @@ internal fun Studio(repo: ProjectRepository, initial: Project, closeRequest: Boo
                         TemplateEditor(t, busy, { updated -> draft = draft.copy(templates = draft.templates.map { if (it.id == t.id) updated else it }) },
                             { commit(saved.updateTemplate(t)) }, { navigate(page) }, { title, action -> confirm = title to action })
                     }
+                    page == 0 && showFolders -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Heading("Папки товаров") {
+                            TextButton(onClick = { showFolders = false }, enabled = !busy) { Text("Назад") }
+                            OutlinedButton(onClick = { folderEditor = "" }, enabled = !busy) { Text("+ Папка") }
+                        }
+                        FolderGrid(saved, busy, Modifier.weight(1f).fillMaxWidth()) {
+                            folderId = it; selectedIds = emptySet(); search = ""; filter = ""; showFolders = false
+                        }
+                    }
                     page == 0 -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Heading("Товары") {
                             if (selectedIds.isNotEmpty()) {
+                                OutlinedButton(onClick = { movingIds = selectedIds }, enabled = !busy, modifier = Modifier.testTag("bulk-move")) { Text("Переместить") }
                                 OutlinedButton(onClick = { commit(saved.deleteProducts(selectedIds), showSuccess = false) }, enabled = !busy,
                                     modifier = Modifier.testTag("bulk-delete")) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
                                 Button(onClick = { bulkEdit = true }, enabled = !busy, modifier = Modifier.testTag("bulk-edit")) { Text("Изменить") }
                             } else Button(onClick = { createProduct = true }, enabled = !busy && saved.templates.isNotEmpty()) { Text("+ Добавить товар") }
                         }
-                        OutlinedButton(onClick = { loadYml(false) }, enabled = !busy) { Text("Загрузить товары из YML") }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { showFolders = true }, enabled = !busy, modifier = Modifier.testTag("open-folders")) { Text("Папки") }
+                            Text(saved.folders.firstOrNull { it.id == activeFolderId }?.name ?: "Рабочий стол", Modifier.weight(1f))
+                            OutlinedButton(onClick = { folderEditor = "" }, enabled = !busy) { Text("+ Папка") }
+                            if (activeFolderId.isNotEmpty()) {
+                                TextButton(onClick = { folderEditor = activeFolderId }, enabled = !busy) { Text("Переименовать") }
+                                TextButton(onClick = { commit(saved.deleteEmptyFolder(activeFolderId), showSuccess = false); folderId = "" },
+                                    enabled = !busy && saved.products.none { it.folderId == activeFolderId }) { Text("Удалить папку") }
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            OutlinedButton(onClick = { loadYml(false) }, enabled = !busy) { Text("Загрузить товары из YML") }
+                            OutlinedButton(onClick = { exportFolderId = activeFolderId; chooseExportFolder = false; navigate(3) }, enabled = !busy) { Text("Выгрузить YML") }
+                        }
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Input(search, { search = it; selectedIds = emptySet() }, "Поиск по названию или артикулу", Modifier.weight(1f))
                             Choice(filter, listOf("" to "Все формы") + saved.templates.map { it.id to it.name }, "Форма", Modifier.width(260.dp)) { filter = it; selectedIds = emptySet() }
                         }
                         val products = saved.products.filter { p ->
                             val v = p.valuesFor(saved.templates.first { it.id == p.templateId })
-                            (filter.isEmpty() || filter == p.templateId) && (search.isBlank() || listOf(v["name"], v["id"]).any { it.orEmpty().contains(search, true) })
+                            p.folderId == activeFolderId && (filter.isEmpty() || filter == p.templateId) && (search.isBlank() || listOf(v["name"], v["id"]).any { it.orEmpty().contains(search, true) })
                         }
                         if (selectedIds.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("Выбрано: ${selectedIds.size}", color = Green)
@@ -226,6 +256,7 @@ internal fun Studio(repo: ProjectRepository, initial: Project, closeRequest: Boo
                                             copySource = p
                                         } catch (e: Exception) { message = e.message }
                                     },
+                                    move = { movingIds = setOf(p.id) },
                                     delete = { confirm = "Удалить товар из каталога?" to { commit(saved.copy(products = saved.products.filter { it.id != p.id }), showSuccess = false) } }) {
                                 Panel(selected = p.id in selectedIds) {
                                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -271,17 +302,51 @@ internal fun Studio(repo: ProjectRepository, initial: Project, closeRequest: Boo
                             } }
                         }
                     })
-                    else -> ExportScreen(saved, busy) { bundle, allowInvalid ->
-                        chooseFile("Сохранить экспорт", if (bundle) "catalog-with-images.zip" else "catalog.yml")?.let { destination -> work("Экспорт сохранён: $destination") { withContext(Dispatchers.IO) { repo.export(saved, destination, bundle, allowInvalid) } } }
+                    else -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        if (chooseExportFolder) {
+                            Heading("Папка для экспорта") {
+                                TextButton(onClick = { chooseExportFolder = false }, enabled = !busy) { Text("Назад") }
+                            }
+                            FolderGrid(saved, busy, Modifier.weight(1f).fillMaxWidth(), tagPrefix = "export-folder-", includeDesktop = false) {
+                                exportFolderId = it; chooseExportFolder = false
+                            }
+                        } else {
+                        val scopeId = exportFolderId?.let { selected -> selected.takeIf { it.isEmpty() || saved.folders.any { folder -> folder.id == it } }.orEmpty() }
+                        val exportProject = if (scopeId == null) saved else saved.copy(products = saved.productsInFolder(scopeId))
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            FilterChip(selected = scopeId == "", onClick = { exportFolderId = "" }, enabled = !busy, label = { Text("Рабочий стол") })
+                            FilterChip(selected = !scopeId.isNullOrEmpty(), onClick = { chooseExportFolder = true }, enabled = !busy, label = { Text("Отдельная папка") })
+                            FilterChip(selected = scopeId == null, onClick = { exportFolderId = null }, enabled = !busy, label = { Text("Все товары") })
+                        }
+                        saved.folders.firstOrNull { it.id == scopeId }?.let { Text("Папка: ${it.name}", style = MaterialTheme.typography.titleMedium) }
+                        Box(Modifier.weight(1f)) { ExportScreen(exportProject, busy) { bundle, allowInvalid ->
+                            chooseFile("Сохранить экспорт", if (bundle) "catalog-with-images.zip" else "catalog.yml")?.let { destination -> work("Экспорт сохранён: $destination") {
+                                withContext(Dispatchers.IO) { repo.export(exportProject, destination, bundle, allowInvalid) }
+                            } }
+                        } }
+                        }
                     }
                 }
                 if (busy) Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.65f)).clickable(enabled = true) {}, contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             }
         }
     }
-    if (bulkEdit && selectedIds.isNotEmpty()) BulkEditDialog(saved, selectedIds, busy, { bulkEdit = false }) { changes, regenerateArticles, photos ->
+    folderEditor?.let { id -> FolderNameDialog(saved, id, busy, { folderEditor = null }) { next ->
         work {
-            val next = saved.updateProducts(selectedIds, changes, regenerateArticles, photos)
+            withContext(Dispatchers.IO) { repo.save(next) }
+            saved = next; draft = next; folderEditor = null
+        }
+    } }
+    if (movingIds.isNotEmpty()) MoveProductsDialog(saved, movingIds, busy, { movingIds = emptySet() }) { destination ->
+        work {
+            val next = saved.moveProducts(movingIds, destination)
+            withContext(Dispatchers.IO) { repo.save(next) }
+            saved = next; draft = next; movingIds = emptySet(); selectedIds = emptySet()
+        }
+    }
+    if (bulkEdit && selectedIds.isNotEmpty()) BulkEditDialog(saved, selectedIds, busy, { bulkEdit = false }) { changes, regenerateArticles, photos, templateChange ->
+        work {
+            val next = saved.updateProducts(selectedIds, changes, regenerateArticles, photos, templateChange)
             withContext(Dispatchers.IO) { repo.save(next) }
             saved = next; draft = next; selectedIds = emptySet(); bulkEdit = false
         }
@@ -338,8 +403,12 @@ internal fun Studio(repo: ProjectRepository, initial: Project, closeRequest: Boo
                     saved = next; draft = next; templateId = template.id
                 } else {
                     val result = preview.addProductsTo(saved)
-                    withContext(Dispatchers.IO) { repo.save(result.project) }
-                    saved = result.project; draft = result.project; search = ""; filter = ""
+                    val oldIds = saved.products.map { it.id }.toSet()
+                    val next = result.project.copy(products = result.project.products.map {
+                        if (it.id in oldIds) it else it.copy(folderId = activeFolderId)
+                    })
+                    withContext(Dispatchers.IO) { repo.save(next) }
+                    saved = next; draft = next; search = ""; filter = ""
                     message = "Добавлено товаров: ${preview.products.size}." +
                         if (result.changedArticles > 0) " Новые артикулы назначены: ${result.changedArticles}." else ""
                 }
@@ -351,7 +420,7 @@ internal fun Studio(repo: ProjectRepository, initial: Project, closeRequest: Boo
         Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
             saved.templates.forEach { t -> TextButton(onClick = {
                 try {
-                    val p = saved.createProduct(newId(), t)
+                    val p = saved.createProduct(newId(), t).copy(folderId = activeFolderId)
                     draft = saved.copy(products = saved.products + p)
                     productId = p.id
                     createProduct = false
@@ -504,7 +573,7 @@ internal val LocalImageDirectory = staticCompositionLocalOf { defaultDataDirecto
         title = { Text("Быстрое заполнение") },
         text = {
             Column(Modifier.width(480.dp).heightIn(max = 440.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("В полях формы задайте переменные: p1 — название, p2 — цвет, p3 — размер, p4 — рост. Используйте p и число без пробелов.")
+                Text("В полях формы задайте переменные: p1 — название, p2 — цвет, p3 — размер, p4 — рост. Можно задать свои имена без пробелов: цвет, size, color_1. Скобки { }, обратная косая черта запрещены в имени.")
                 Text("Шаблон в форме:", fontWeight = FontWeight.Medium)
                 SelectionContainer { Text("p1{Футболка RLS, p2, p3/p4}") }
                 Text("При копировании:", fontWeight = FontWeight.Medium)
@@ -565,7 +634,7 @@ internal val LocalImageDirectory = staticCompositionLocalOf { defaultDataDirecto
                     Toggle(f.required, "Требовать заполнение в этой форме") { change(f.copy(required = it)) }
                     if (f.target != "name") Toggle(f.quickAccess, "Быстрый доступ: в списке и при копировании товара") { change(f.copy(quickAccess = it)) }
                     if (f.target !in listOf("id", "ste")) {
-                        Input(f.copyVariable, { change(f.copy(copyVariable = it.trim())) }, "Переменная быстрого заполнения (p1, p2…)")
+                        Input(f.copyVariable, { change(f.copy(copyVariable = it.trim())) }, "Переменная быстрого заполнения (цвет, size, p1…)")
                     }
                 }
             }

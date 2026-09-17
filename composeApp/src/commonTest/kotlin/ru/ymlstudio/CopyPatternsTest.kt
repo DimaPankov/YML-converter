@@ -4,6 +4,37 @@ import kotlinx.serialization.encodeToString
 import kotlin.test.*
 
 class CopyPatternsTest {
+    @Test fun customNamesWithSymbolsExpandAndAssignByExactBinding() {
+        val names = listOf("название", "цвет", "size", "color_1", "size-2", "$", "@", "42", "[x]", "★")
+        val template = Template("t", "Форма", fields = names.mapIndexed { i, name ->
+            Field("f$i", "param", "Поле $i", copyVariable = name)
+        }, copyPattern = "название{Футболка, " + names.drop(1).joinToString(", ") + "}")
+        assertNull(template.copyPatternError())
+        val source = Product("source", "t", names.indices.associate { "f$it" to "значение$it" })
+        val input = template.copyText(source)
+        val values = template.copyValues(input)
+        names.indices.drop(1).forEach { assertEquals("значение$it", values["f$it"]) }
+        assertTrue(values.getValue("f0").startsWith("Футболка, значение1"))
+        assertFailsWith<IllegalArgumentException> { template.copyValues(template.copyPattern) }
+    }
+
+    @Test fun overlappingCustomNamesDoNotMatchPartsOfWords() {
+        val template = Template("t", "Форма", fields = listOf(
+            Field("a", "param", "A", copyVariable = "color"),
+            Field("b", "param", "B", copyVariable = "color-1")
+        ), copyPattern = "watercolor: color / color-1")
+        val input = template.copyText(Product("p", "t", mapOf("a" to "синий", "b" to "красный")))
+        assertEquals("watercolor: color{синий} / color-1{красный}", input)
+        assertEquals(mapOf("a" to "синий", "b" to "красный"), template.copyValues(input))
+    }
+
+    @Test fun spacesAndReservedSyntaxCannotBeUsedInArgumentNames() {
+        for (name in listOf("collor collor", "x\ty", "x{y", "x}y", "x\\y")) {
+            val template = form().copy(fields = form().fields.map { if (it.copyVariable == "p2") it.copy(copyVariable = name) else it })
+            assertNotNull(template.copyPatternError(), name)
+        }
+    }
+
     @Test fun bareTemplateReferencesExpandIntoRequiredBracesForEditing() {
         val template = form().copy(
             fields = form().fields + Field("height", "param", "Рост", copyVariable = "p4"),

@@ -22,7 +22,7 @@ import kotlin.math.roundToInt
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable internal fun ProductContextMenu(id: String, selected: Boolean, canSelect: Boolean, busy: Boolean,
     selectionMode: Boolean,
-    toggleSelection: () -> Unit, edit: () -> Unit, copy: () -> Unit, delete: () -> Unit,
+    toggleSelection: () -> Unit, edit: () -> Unit, copy: () -> Unit, delete: () -> Unit, move: () -> Unit,
     content: @Composable () -> Unit) {
     var position by remember(id) { mutableStateOf<Offset?>(null) }
     Box(Modifier.testTag("product-row-$id").onPointerEvent(PointerEventType.Press) { event ->
@@ -45,6 +45,7 @@ import kotlin.math.roundToInt
                     HorizontalDivider()
                     DropdownMenuItem(text = { Text("Изменить") }, enabled = !busy, onClick = { position = null; edit() })
                     DropdownMenuItem(text = { Text("Копировать") }, enabled = !busy, onClick = { position = null; copy() })
+                    DropdownMenuItem(text = { Text("Переместить") }, enabled = !busy, onClick = { position = null; move() })
                     DropdownMenuItem(text = { Text("Удалить") }, enabled = !busy, onClick = { position = null; delete() })
                 }
             }

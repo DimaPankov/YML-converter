@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -17,20 +19,23 @@ import androidx.compose.ui.window.DialogProperties
 
 @Composable internal fun BulkEditDialog(project: Project, ids: Set<String>, busy: Boolean,
     dismiss: () -> Unit,
-    apply: (Map<String, String>, Boolean, BulkPhotoChange) -> Unit) {
+    apply: (Map<String, String>, Boolean, BulkPhotoChange, BulkTemplateChange?) -> Unit) {
     val selected = remember(project, ids) { project.selectedProducts(ids) }
     val template = project.templates.first { it.id == selected.first().templateId }
     val fields = template.bulkFields(project.settings)
     var changes by remember(project, ids) { mutableStateOf(emptyMap<String, String>()) }
     var regenerateArticles by remember(project, ids) { mutableStateOf(false) }
     var photos by remember(project, ids) { mutableStateOf(BulkPhotoChange()) }
+    var useTemplate by remember(project, ids) { mutableStateOf(false) }
+    var applyAllTemplate by remember(project, ids) { mutableStateOf(false) }
+    val baseline = remember(project, ids) { runCatching { template.copyText(selected.first()) } }
+    var templateText by remember(project, ids) { mutableStateOf(baseline.getOrDefault("")) }
+    val templatePreview = remember(project, ids, templateText, applyAllTemplate) { runCatching {
+        selected.map { template.bulkCopyValues(templateText, baseline.getOrThrow(), it, applyAllTemplate) }
+    } }
+    val templateError = if (useTemplate) templatePreview.exceptionOrNull()?.message else null
     val needsPictures = photos.mode in listOf(BulkPhotoMode.ADD, BulkPhotoMode.REPLACE)
-    val photoError = when {
-        needsPictures && photos.pictures.isEmpty() -> "Добавьте фотографии"
-        needsPictures && photos.pictures.any { it.file.isBlank() && it.url.isBlank() } -> "Укажите ссылку фотографии"
-        selected.any { photos.applyTo(it.pictures).size > 10 } -> "Максимум 10 фотографий у товара"
-        else -> null
-    }
+    val photoError = photos.errorFor(selected)
     val initial = remember(project, ids) {
         fields.associate { field -> field.id to selected.map { it.values[field.id].orEmpty() }.distinct().singleOrNull() }
     }
@@ -57,7 +62,30 @@ import androidx.compose.ui.window.DialogProperties
 
                 }
                 LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("bulk-fields"), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    items(fields, key = { it.id }) { field ->
+                    if (template.copyPattern.isNotBlank()) item {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(useTemplate, { useTemplate = it }, enabled = !busy, modifier = Modifier.testTag("bulk-use-template"))
+                                Text("Заполнить строкой")
+                            }
+                            if (useTemplate) {
+                                OutlinedTextField(templateText, { templateText = it }, label = { Text("Быстрое заполнение") },
+                                    minLines = 3, modifier = Modifier.fillMaxWidth(), enabled = !busy)
+                                Text("Меняйте нужные аргументы; остальные сохранят свои значения.", style = MaterialTheme.typography.bodySmall)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Checkbox(applyAllTemplate, { applyAllTemplate = it }, enabled = !busy)
+                                    Text("Применить все значения шаблона")
+                                }
+                                templateError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                                if (templateError == null) templatePreview.getOrNull()?.take(3)?.forEachIndexed { index, values ->
+                                    Text("Товар ${index + 1}: " + values.entries.joinToString("; ") { (id, value) ->
+                                        "${template.fields.first { it.id == id }.label}: $value"
+                                    }.ifBlank { "Без изменений" }, style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                    }
+                    if (!useTemplate) items(fields, key = { it.id }) { field ->
                         Column {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Checkbox(field.id in changes, { enabled ->
@@ -76,13 +104,22 @@ import androidx.compose.ui.window.DialogProperties
                     item {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("Фотографии", style = MaterialTheme.typography.titleMedium)
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 BulkPhotoMode.entries.forEach { mode ->
                                     FilterChip(selected = photos.mode == mode, onClick = { photos = photos.copy(mode = mode) },
                                         enabled = !busy, modifier = Modifier.testTag("bulk-photos-${mode.name}"), label = { Text(mode.label) })
                                 }
                             }
                             if (photos.mode == BulkPhotoMode.KEEP) selected.flatMap { it.pictures }.distinct().forEach { PhotoLocation(it) }
+                            if (photos.mode == BulkPhotoMode.EDIT_URL) {
+                                OutlinedTextField((photos.photoIndex + 1).toString(), { number ->
+                                    number.toIntOrNull()?.takeIf { it in 1..10 }?.let { photos = photos.copy(photoIndex = it - 1) }
+                                }, enabled = !busy, label = { Text("Номер фотографии (1–10)") }, singleLine = true)
+                                val currentUrls = selected.mapNotNull { it.pictures.getOrNull(photos.photoIndex) }.distinct()
+                                currentUrls.forEach { PhotoLocation(it) }
+                                OutlinedTextField(photos.replacementUrl, { photos = photos.copy(replacementUrl = it) },
+                                    enabled = !busy, label = { Text("Новая ссылка фотографии") }, modifier = Modifier.fillMaxWidth())
+                            }
                             if (needsPictures) {
                                 photos.pictures.forEachIndexed { index, picture ->
                                     Column {
@@ -107,8 +144,9 @@ import androidx.compose.ui.window.DialogProperties
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(dismiss, enabled = !busy) { Text("Отмена") }
-                    Button({ apply(changes, regenerateArticles, photos) },
-                        enabled = !busy && photoError == null && (changes.isNotEmpty() || regenerateArticles || photos.mode != BulkPhotoMode.KEEP), modifier = Modifier.testTag("bulk-apply")) {
+                    Button({ apply(if (useTemplate) emptyMap() else changes, regenerateArticles, photos, if (useTemplate) BulkTemplateChange(templateText, applyAllTemplate) else null) },
+                        enabled = !busy && photoError == null && templateError == null &&
+                            ((if (useTemplate) templatePreview.getOrNull()?.any { it.isNotEmpty() } == true else changes.isNotEmpty()) || regenerateArticles || photos.mode != BulkPhotoMode.KEEP), modifier = Modifier.testTag("bulk-apply")) {
                         Text(if (busy) "Сохранение…" else "Применить к ${selected.size} товарам")
                     }
                 }

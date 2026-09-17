@@ -53,7 +53,7 @@ class BulkAndThemeUiTest {
         compose.setContent {
             CompositionLocalProvider(LocalImageDirectory provides directory) {
                 StudioTheme(false) {
-                    BulkEditDialog(initial, setOf("a", "b"), false, {}) { changes, articles, photos ->
+                    BulkEditDialog(initial, setOf("a", "b"), false, {}) { changes, articles, photos, _ ->
                         result = initial.updateProducts(setOf("a", "b"), changes, articles, photos)
                     }
                 }
