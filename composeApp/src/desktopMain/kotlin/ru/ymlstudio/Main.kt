@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -497,13 +498,32 @@ internal val LocalImageDirectory = staticCompositionLocalOf { defaultDataDirecto
 
 @Composable private fun TemplateEditor(t: Template, busy: Boolean, update: (Template) -> Unit, save: () -> Unit, cancel: () -> Unit, confirm: (String, () -> Unit) -> Unit) {
     val patternError = remember(t) { t.copyPatternError() }
+    var showPatternHelp by remember(t.id) { mutableStateOf(false) }
+    if (showPatternHelp) AlertDialog(
+        onDismissRequest = { showPatternHelp = false },
+        title = { Text("Быстрое заполнение") },
+        text = {
+            Column(Modifier.width(480.dp).heightIn(max = 440.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("В полях формы задайте переменные: p1 — название, p2 — цвет, p3 — размер, p4 — рост. Используйте p и число без пробелов.")
+                Text("Шаблон в форме:", fontWeight = FontWeight.Medium)
+                SelectionContainer { Text("p1{Футболка RLS, p2, p3/p4}") }
+                Text("При копировании:", fontWeight = FontWeight.Medium)
+                SelectionContainer { Text("p1{Футболка RLS, p2{синий}, p3{54}/p4{194}}") }
+                Text("Меняйте значения внутри скобок. Цвет, размер, рост и название заполнятся вместе. При заполнении скобки обязательны. Количество переменных выбираете сами.")
+            }
+        },
+        confirmButton = { TextButton(onClick = { showPatternHelp = false }) { Text("Понятно") } }
+    )
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Heading("Редактор формы") { OutlinedButton(cancel, enabled = !busy) { Text("Отмена") }; Button(save, enabled = !busy && patternError == null) { Text("Сохранить") } }
         if (patternError != null) Text(patternError, color = MaterialTheme.colorScheme.error)
         LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             item { Input(t.name, { update(t.copy(name = it)) }, "Название формы") }
             item { Panel {
-                Text("Заполнение одной строкой", style = MaterialTheme.typography.titleMedium)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Заполнение одной строкой", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    TextButton(onClick = { showPatternHelp = true }) { Text("Справка") }
+                }
                 OutlinedTextField(
                     value = t.copyPattern,
                     onValueChange = { update(t.copy(copyPattern = it)) },
@@ -513,7 +533,6 @@ internal val LocalImageDirectory = staticCompositionLocalOf { defaultDataDirecto
                     minLines = 3,
                     enabled = !busy
                 )
-                Text("Свяжите p1, p2… с полями ниже.", color = Muted, style = MaterialTheme.typography.bodySmall)
             } }
             item { Input(t.description, { update(t.copy(description = it)) }, "Описание формы", multiline = true) }
             if (t.defaultPictures.isNotEmpty()) item { Panel {
